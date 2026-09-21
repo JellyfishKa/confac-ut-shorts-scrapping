@@ -6,6 +6,7 @@ import httpx
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
 from app.scoring import PublicStats, derive_stats, passes_filter
+from app.snapshots import SnapshotStore
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
 _DURATION_RE = re.compile(r"PT(?:(?P<h>\d+)H)?(?:(?P<m>\d+)M)?(?:(?P<s>\d+)S)?")
@@ -22,7 +23,11 @@ class YouTubeProvider:
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.youtube_api_key
         if not self.api_key:
-            raise RuntimeError("YOUTUBE_API_KEY is not configured")
+            raise RuntimeError(
+                "YOUTUBE_API_KEY is not configured. Copy .env.example to .env "
+                "and paste an API key with YouTube Data API v3 enabled."
+            )
+        self.snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
 
     async def search(self, request: SearchRequest) -> tuple[int, list[VideoCandidate]]:
         max_age = request.max_age_hours or settings.default_max_age_hours
@@ -36,6 +41,7 @@ class YouTubeProvider:
                     "type": "video",
                     "q": request.query,
                     "order": "viewCount",
+                    "videoDuration": "short",
                     "publishedAfter": published_after.isoformat().replace("+00:00", "Z"),
                     "maxResults": min(settings.max_results, 50),
                     "key": self.api_key,
@@ -59,6 +65,28 @@ class YouTubeProvider:
             videos_response.raise_for_status()
             raw_videos = videos_response.json().get("items", [])
 
+            channel_ids = sorted({
+                item.get("snippet", {}).get("channelId", "")
+                for item in raw_videos
+                if item.get("snippet", {}).get("channelId")
+            })
+            channel_stats: dict[str, int | None] = {}
+            if channel_ids:
+                channels_response = await client.get(
+                    f"{YOUTUBE_API}/channels",
+                    params={
+                        "part": "statistics",
+                        "id": ",".join(channel_ids[:50]),
+                        "key": self.api_key,
+                    },
+                )
+                channels_response.raise_for_status()
+                for channel in channels_response.json().get("items", []):
+                    stats = channel.get("statistics", {})
+                    hidden = stats.get("hiddenSubscriberCount", False)
+                    value = None if hidden else int(stats.get("subscriberCount", 0) or 0)
+                    channel_stats[channel["id"]] = value
+
         candidates: list[VideoCandidate] = []
         for item in raw_videos:
             snippet = item.get("snippet", {})
@@ -73,6 +101,12 @@ class YouTubeProvider:
                 duration_seconds=parse_duration(content.get("duration", "")),
             )
             derived = derive_stats(public)
+            growth = self.snapshots.observe(
+                item["id"],
+                views=public.views,
+                likes=public.likes,
+                comments=public.comments,
+            )
 
             if not passes_filter(
                 public,
@@ -86,22 +120,51 @@ class YouTubeProvider:
                 continue
 
             video_id = item["id"]
+            channel_id = snippet.get("channelId", "")
+            subscribers = channel_stats.get(channel_id)
+            breakout_ratio = None
+            if subscribers and subscribers > 0:
+                breakout_ratio = round(public.views / subscribers, 4)
+
+            thumbs = snippet.get("thumbnails", {})
+            thumbnail_url = (
+                thumbs.get("high", {}).get("url")
+                or thumbs.get("medium", {}).get("url")
+                or thumbs.get("default", {}).get("url")
+            )
+
             candidates.append(VideoCandidate(
                 video_id=video_id,
                 url=f"https://www.youtube.com/shorts/{video_id}",
                 title=snippet.get("title", ""),
+                description=snippet.get("description", ""),
+                channel_id=channel_id,
                 channel_title=snippet.get("channelTitle", ""),
+                thumbnail_url=thumbnail_url,
                 published_at=published_at,
                 duration_seconds=public.duration_seconds,
                 views=public.views,
                 likes=public.likes,
                 comments=public.comments,
+                subscribers=subscribers,
                 age_hours=derived.age_hours,
                 views_per_hour=derived.views_per_hour,
                 like_rate=derived.like_rate,
                 comment_rate=derived.comment_rate,
+                breakout_ratio=breakout_ratio,
+                previous_views=growth.previous_views,
+                growth_views_per_hour=growth.growth_views_per_hour,
+                growth_likes_per_hour=growth.growth_likes_per_hour,
+                snapshot_age_minutes=growth.snapshot_age_minutes,
                 popularity_score=derived.popularity_score,
             ))
 
-        candidates.sort(key=lambda video: video.popularity_score, reverse=True)
+        candidates.sort(
+            key=lambda video: (
+                video.growth_views_per_hour is not None,
+                video.growth_views_per_hour or 0,
+                video.popularity_score,
+            ),
+            reverse=True,
+        )
         return len(raw_videos), candidates[: request.limit]
