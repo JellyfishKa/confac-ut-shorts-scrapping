@@ -3,5 +3,5 @@ uvicorn[standard]==0.36.0
 httpx==0.28.1
 pydantic==2.11.9
 pydantic-settings==2.10.1
-yt-dlp==2026.9.18
+yt-dlp>=2026.8.19,<2027
 pytest==8.4.2
