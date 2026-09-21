@@ -3,4 +3,7 @@ __pycache__/
 .venv/
 .env
 downloads/
+data/
+exports/
 *.pyc
+.ipynb_checkpoints/

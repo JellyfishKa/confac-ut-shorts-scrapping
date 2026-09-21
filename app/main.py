@@ -4,11 +4,20 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.comfy import build_comfy_manifest
+from app.config import settings
 from app.downloader import VideoDownloader
-from app.models import DownloadRequest, DownloadResponse, SearchRequest, SearchResponse
+from app.models import (
+    ComfyManifestRequest,
+    ComfyManifestResponse,
+    DownloadRequest,
+    DownloadResponse,
+    SearchRequest,
+    SearchResponse,
+)
 from app.youtube import YouTubeProvider
 
-app = FastAPI(title="YouTube Shorts Scrapping MVP", version="0.1.0")
+app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0")
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -20,8 +29,13 @@ def index() -> FileResponse:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict:
+    return {
+        "status": "ok",
+        "youtube_api_key_configured": bool(settings.youtube_api_key),
+        "snapshot_db": str(settings.data_dir / "snapshots.sqlite3"),
+        "mode": "live" if settings.youtube_api_key else "needs_api_key",
+    }
 
 
 @app.post("/api/search", response_model=SearchResponse)
@@ -36,6 +50,13 @@ async def search_videos(request: SearchRequest) -> SearchResponse:
         found=found,
         returned=len(videos),
         videos=videos,
+    )
+
+
+@app.post("/api/comfy/manifest", response_model=ComfyManifestResponse)
+def comfy_manifest(request: ComfyManifestRequest) -> ComfyManifestResponse:
+    return ComfyManifestResponse(
+        manifest=build_comfy_manifest(request.video, request.local_video_path)
     )
 
 

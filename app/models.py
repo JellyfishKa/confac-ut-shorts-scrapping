@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -18,16 +18,25 @@ class VideoCandidate(BaseModel):
     video_id: str
     url: str
     title: str
+    description: str = ""
+    channel_id: str = ""
     channel_title: str
+    thumbnail_url: str | None = None
     published_at: datetime
     duration_seconds: int
     views: int
     likes: int
     comments: int
+    subscribers: int | None = None
     age_hours: float
     views_per_hour: float
     like_rate: float
     comment_rate: float
+    breakout_ratio: float | None = None
+    previous_views: int | None = None
+    growth_views_per_hour: float | None = None
+    growth_likes_per_hour: float | None = None
+    snapshot_age_minutes: float | None = None
     popularity_score: float
 
 
@@ -47,3 +56,12 @@ class DownloadResponse(BaseModel):
     video_id: str | None = None
     path: str | None = None
     error: str | None = None
+
+
+class ComfyManifestRequest(BaseModel):
+    video: VideoCandidate
+    local_video_path: str | None = None
+
+
+class ComfyManifestResponse(BaseModel):
+    manifest: dict[str, Any]
