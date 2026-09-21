@@ -1,74 +1,80 @@
 # ComfyUI handoff
 
-The repository deliberately does **not** hard-code Dmitry's ComfyUI workflow, because the workflow is still changing.
+Этот документ описывает нейтральный контракт между metadata-collector и ComfyUI workflow.
 
-Instead we expose a stable metadata contract.
+Цель интеграции — не связывать collector с конкретными node ID или текущей структурой workflow. Collector должен отдавать стабильный manifest, а отдельный adapter уже сопоставляет его поля с input-полями выбранного API-format workflow.
 
-## Current flow
+## Текущий поток данных
 
 ```text
-YouTube API
+YouTube Data API
   -> VideoCandidate
   -> POST /api/comfy/manifest
   -> JSON manifest
-  -> adapter owned by the ComfyUI workflow
+  -> ComfyUI adapter
+  -> API-format workflow
+  -> POST /prompt
 ```
 
-This allows us to keep doing cheap metadata research while the generation workflow evolves.
+Пока generation workflow развивается, metadata-часть может независимо собирать, ранжировать и экспортировать кандидатов.
 
-## Why we should not download first
+## Зачем отделять metadata от MP4
 
-Many ComfyUI experiments can start from title, description, source URL, virality score, views/hour, growth views/hour, like/comment rate and breakout ratio.
+Для части downstream-сценариев достаточно:
 
-Only workflow nodes that require actual frames, audio, OCR, transcription or video reconstruction need a local MP4.
+- source URL;
+- title;
+- description;
+- popularity score;
+- views/hour;
+- growth views/hour;
+- like/comment rate;
+- breakout ratio.
+
+Локальный MP4 нужен только тем шагам, которые работают с содержимым самого видео: кадрами, аудио, OCR, транскрибацией, visual analysis или video reconstruction.
 
 ```text
 candidate
   |
-  +-- metadata-only workflow --> no download
+  +-- metadata-only workflow --> без скачивания
   |
-  +-- video analysis/generation --> download finalist --> local_video_path
+  +-- video-level workflow --> download finalist --> local_video_path
 ```
 
-## API-format workflow
+## Manifest
 
-For programmatic execution, ComfyUI expects its **API workflow format**, not the normal UI save JSON.
+Endpoint:
 
-Export the workflow in API format (`Export Workflow (API)` / `Save (API)`, wording depends on the frontend version).
+```http
+POST /api/comfy/manifest
+```
 
-A local ComfyUI instance normally accepts a prompt payload at:
+принимает объект кандидата и необязательный `local_video_path`.
+
+На metadata-only этапе:
+
+```json
+{
+  "video": {"...": "candidate returned by /api/search"},
+  "local_video_path": null
+}
+```
+
+Manifest содержит три логических блока:
 
 ```text
-POST http://127.0.0.1:8188/prompt
+source
+virality
+comfyui_inputs
 ```
 
-Conceptually:
+`source` содержит исходные сведения о ролике.
 
-```python
-import json
-import urllib.request
+`virality` содержит рассчитанные metadata-метрики.
 
-workflow = json.load(open("workflow_api.json", encoding="utf-8"))
-manifest = json.load(open("VIDEO_ID.comfy-manifest.json", encoding="utf-8"))
+`comfyui_inputs` — плоский набор значений, предназначенный для последующего mapping в input-поля ComfyUI workflow.
 
-# Example only. Replace node IDs with the real workflow inputs.
-workflow["12"]["inputs"]["text"] = manifest["source"]["title"]
-workflow["18"]["inputs"]["text"] = json.dumps(manifest["virality"], ensure_ascii=False)
-
-payload = json.dumps({"prompt": workflow}).encode("utf-8")
-request = urllib.request.Request(
-    "http://127.0.0.1:8188/prompt",
-    data=payload,
-    headers={"Content-Type": "application/json"},
-)
-urllib.request.urlopen(request).read()
-```
-
-Official ComfyUI examples use the same basic `/prompt` pattern. Actual node IDs and input names must come from Dmitry's exported API workflow.
-
-## Stable fields to map
-
-Recommended fields under `comfyui_inputs`:
+## Рекомендуемые поля `comfyui_inputs`
 
 ```text
 source_url
@@ -83,4 +89,84 @@ comment_rate_pct
 breakout_ratio
 ```
 
-When the workflow stabilizes, the next step is a tiny `app/comfy_runner.py` adapter that accepts the manifest, Dmitry's API workflow JSON and a node mapping config, then returns ComfyUI `prompt_id`.
+`source_video_path` может быть `null`. Это означает, что кандидат ещё не скачивался и downstream workflow должен работать только с метаданными либо явно запросить скачивание.
+
+## API-format workflow
+
+Для программного запуска ComfyUI используется workflow в API-формате, а не обычный UI-save JSON.
+
+Workflow экспортируется из ComfyUI в API format. Название пункта меню зависит от версии frontend и обычно содержит `Export Workflow (API)` или `Save (API)`.
+
+Локальный ComfyUI обычно принимает prompt по адресу:
+
+```text
+POST http://127.0.0.1:8188/prompt
+```
+
+Пример принципа интеграции:
+
+```python
+import json
+import urllib.request
+
+workflow = json.load(open("workflow_api.json", encoding="utf-8"))
+manifest = json.load(open("VIDEO_ID.comfy-manifest.json", encoding="utf-8"))
+
+# Node IDs приведены только как пример.
+workflow["12"]["inputs"]["text"] = manifest["source"]["title"]
+workflow["18"]["inputs"]["text"] = json.dumps(
+    manifest["virality"],
+    ensure_ascii=False,
+)
+
+payload = json.dumps({"prompt": workflow}).encode("utf-8")
+request = urllib.request.Request(
+    "http://127.0.0.1:8188/prompt",
+    data=payload,
+    headers={"Content-Type": "application/json"},
+)
+
+urllib.request.urlopen(request).read()
+```
+
+Фактические node ID и input names должны извлекаться из конкретного экспортированного API workflow.
+
+## Рекомендуемая граница ответственности
+
+Collector отвечает за:
+
+- поиск;
+- публичные metadata;
+- snapshots;
+- derived metrics;
+- ranking;
+- shortlist;
+- manifest.
+
+ComfyUI adapter отвечает за:
+
+- загрузку API-format workflow;
+- mapping manifest-полей в inputs;
+- подстановку `local_video_path`, если MP4 требуется;
+- отправку `/prompt`;
+- возврат `prompt_id`.
+
+Такой контракт позволяет менять ComfyUI workflow без изменений в логике поиска и анализа metadata.
+
+## Следующий шаг интеграции
+
+После стабилизации API-format workflow можно добавить модуль, например:
+
+```text
+app/comfy_runner.py
+```
+
+который принимает:
+
+```text
+manifest
+workflow_api.json
+node_mapping.json
+```
+
+и возвращает ComfyUI `prompt_id`.
