@@ -1,22 +1,134 @@
 # confac-ut-shorts-scrapping
 
-Zero-budget **metadata-first** MVP for finding, ranking and selectively downloading YouTube Shorts for the content-factory pipeline.
+Metadata-first MVP для поиска, ранжирования и выборочного скачивания YouTube Shorts в контент-пайплайне.
 
-The point of the demo is not «мы умеем скачивать Shorts». The point is:
+Основная идея проекта — максимально долго работать только с метаданными и скачивать исходное видео лишь тогда, когда оно действительно требуется для последующей обработки.
 
-> inspect 10–50 candidates as cheap metadata, keep snapshots, rank them, send structured data to the next workflow, and download MP4 only for the few finalists that actually need video-level analysis.
+## Что реализовано
 
-## Что уже можно показать
+- поиск кандидатов через YouTube Data API v3;
+- получение публичных метаданных видео и каналов;
+- фильтрация по возрасту, длительности, просмотрам и engagement-метрикам;
+- расчёт производных метрик для сравнения роликов;
+- сохранение повторных наблюдений в SQLite;
+- расчёт фактического роста просмотров между snapshot'ами;
+- экспорт результатов в CSV и JSON;
+- формирование нейтрального JSON-manifest для передачи данных в ComfyUI;
+- выборочное скачивание финалистов через `yt-dlp`;
+- Jupyter Notebook для анализа результатов и построения графиков.
 
-- real YouTube Data API search;
-- public metadata: title, description, publish time, duration, views, likes, comments, channel subscribers;
-- derived metrics: age, average views/hour, like rate, comment rate, breakout ratio;
-- SQLite snapshots and **real delta views/hour** after the same video is observed again;
-- metadata score and shortlist without downloading anything;
-- CSV / JSON export;
-- one-click **ComfyUI manifest** export for a selected candidate;
-- explicit MP4 download via `yt-dlp` only when you choose a finalist;
-- Jupyter notebook with live API data and charts.
+## Архитектура
+
+```text
+YouTube Data API
+       ↓
+public metadata
+       ↓
+SQLite snapshots ─────→ growth metrics
+       ↓
+filter + scoring
+       ↓
+shortlist
+       ↓
+CSV / JSON / Jupyter / ComfyUI manifest
+       ↓
+        ├── metadata-only workflow → без скачивания
+        │
+        └── video-level workflow → yt-dlp → local MP4
+```
+
+Такой подход позволяет сначала обработать десятки кандидатов по дешёвым данным и скачивать только несколько роликов, которым нужен анализ кадров, аудио, OCR, транскрибация или другой video-level processing.
+
+## Используемые данные
+
+### Публичные метаданные
+
+Для каждого кандидата сохраняются:
+
+```text
+video_id
+url
+title
+description
+channel_title
+published_at
+duration_seconds
+views
+likes
+comments
+subscribers
+thumbnail_url
+```
+
+Количество подписчиков может отсутствовать, если канал не предоставляет его публично.
+
+### Производные метрики
+
+`age_hours`
+
+Возраст ролика в часах.
+
+`views_per_hour`
+
+```text
+views / age_hours
+```
+
+Средняя скорость набора просмотров с момента публикации.
+
+`like_rate`
+
+```text
+likes / views
+```
+
+`comment_rate`
+
+```text
+comments / views
+```
+
+`breakout_ratio`
+
+```text
+views / subscribers
+```
+
+Показывает масштаб ролика относительно размера канала. Метрика недоступна, если число подписчиков скрыто.
+
+`growth_views_per_hour`
+
+```text
+(current_views - previous_views) / elapsed_hours
+```
+
+Рассчитывается после повторного наблюдения того же видео и отражает фактическую скорость роста между двумя snapshot'ами.
+
+`popularity_score`
+
+Конфигурируемая эвристическая оценка для сортировки кандидатов. На текущем этапе она не является моделью прогнозирования виральности и предназначена только для предварительного ранжирования.
+
+## Почему используются snapshot'ы
+
+`views_per_hour` показывает среднюю скорость за всё время существования ролика. Для поиска роликов, которые ускоряются прямо сейчас, этого недостаточно.
+
+Поэтому каждый поиск сохраняет наблюдение в SQLite:
+
+```text
+video_id
+observed_at
+views
+likes
+comments
+```
+
+При следующем появлении того же ролика можно вычислить изменение метрик за фактический интервал времени.
+
+База создаётся автоматически:
+
+```text
+data/snapshots.sqlite3
+```
 
 ## Быстрый запуск
 
@@ -26,146 +138,156 @@ cd confac-ut-shorts-scrapping
 python -m venv .venv
 ```
 
-Activate:
+Активация окружения:
 
-```bash
+```powershell
 # Windows PowerShell
 .venv\Scripts\Activate.ps1
+```
 
+```bash
 # macOS / Linux
 source .venv/bin/activate
 ```
 
-Install:
+Установка зависимостей:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-Create `.env`:
+Создание `.env`:
 
-```bash
+```powershell
 # Windows
 copy .env.example .env
+```
 
+```bash
 # macOS / Linux
 cp .env.example .env
 ```
 
-Put the key into `.env`:
+Добавьте API key:
 
 ```env
 YOUTUBE_API_KEY=your_key_here
 ```
 
-Start:
+Запуск:
 
 ```bash
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
-Open `http://127.0.0.1:8000`.
+Интерфейс будет доступен по адресу:
 
-The page should show **YouTube API key подключён**.
+```text
+http://127.0.0.1:8000
+```
 
-## Как получить тестовый YouTube API key
+## Получение YouTube Data API key
 
-Для публичных metadata нужен обычный **API key**, OAuth не нужен.
+Для доступа к публичным метаданным достаточно обычного API key; OAuth на текущем этапе не требуется.
 
-1. Открой Google Cloud Console.
-2. Создай новый project (или выбери существующий).
-3. Открой **APIs & Services → Library**.
-4. Найди и включи **YouTube Data API v3**.
-5. Открой **APIs & Services → Credentials**.
-6. Нажми **Create credentials → API key**.
-7. Скопируй ключ в `.env`.
-8. Лучше сразу поставить API restriction: **YouTube Data API v3**.
+1. Создайте или выберите проект в Google Cloud Console.
+2. Откройте **APIs & Services → Library**.
+3. Включите **YouTube Data API v3**.
+4. Откройте **APIs & Services → Credentials**.
+5. Выберите **Create credentials → API key**.
+6. Сохраните ключ в `.env`.
+7. Рекомендуется ограничить ключ только API `YouTube Data API v3`.
 
-Official docs:
+Документация Google:
+
 - https://developers.google.com/youtube/v3/getting-started
 - https://developers.google.com/youtube/registering_an_application
 - https://docs.cloud.google.com/docs/authentication/api-keys
 
-As of 2026, `search.list` has its own default bucket of 100 calls/day. One search in this MVP uses one `search.list`, one `videos.list`, and one `channels.list` call.
+## Сценарий демонстрации
 
-## Что показать Дмитрию за 2 минуты
+1. Запустить приложение и выполнить поиск по теме, например `AI tools`.
+2. Показать, что список кандидатов и их метрики получены без скачивания MP4.
+3. Сравнить кандидатов по `views/h`, `like rate`, `comment rate`, `breakout` и `score`.
+4. Экспортировать текущую выборку в CSV или JSON.
+5. Сформировать `Comfy JSON` для выбранного кандидата.
+6. Повторить тот же поиск через некоторое время и показать появившийся `Δ views/h`.
+7. Скачать MP4 только для выбранного финалиста, если downstream-пайплайну действительно требуется видео.
 
-1. В UI ищем, например, `AI tools`.
-2. Показываем, что получили 10–50 реальных роликов и **не скачали ни одного**.
-3. Смотрим `views/h`, `like rate`, `breakout`, metadata `score`.
-4. Нажимаем `CSV` или `JSON` — данные можно анализировать отдельно.
-5. Нажимаем `Comfy JSON` у одного кандидата — получаем контракт для ComfyUI без MP4.
-6. `MP4` нажимаем только если downstream workflow реально требует видео.
-7. Через 10–30 минут повторяем тот же поиск: появляется `Δ views/h` на повторно найденных роликах.
+## ComfyUI integration
 
-Snapshots live in:
+Endpoint `POST /api/comfy/manifest` формирует workflow-agnostic manifest. Collector не зависит от конкретных node ID внутри ComfyUI workflow.
 
-```text
-data/snapshots.sqlite3
+Пример структуры:
+
+```json
+{
+  "source": {
+    "url": "https://www.youtube.com/shorts/VIDEO_ID",
+    "local_video_path": null,
+    "title": "...",
+    "description": "..."
+  },
+  "virality": {
+    "views": 250000,
+    "views_per_hour": 12000,
+    "growth_views_per_hour": 18000,
+    "like_rate": 0.052,
+    "comment_rate": 0.004,
+    "breakout_ratio": 12.4,
+    "popularity_score": 0.81
+  },
+  "comfyui_inputs": {
+    "source_url": "...",
+    "source_video_path": null,
+    "source_title": "...",
+    "virality_score": 0.81
+  }
+}
 ```
 
-## Метрики
+Пока workflow в ComfyUI меняется, manifest выступает стабильным промежуточным контрактом. После стабилизации workflow можно добавить adapter, который сопоставит поля manifest с конкретными input-полями API-format workflow и отправит его в ComfyUI через `/prompt`.
 
-Raw public metadata:
+Подробности: [`research/comfyui-handoff.md`](research/comfyui-handoff.md).
 
-```text
-published_at
-duration_seconds
-views
-likes
-comments
-subscribers (если публичны)
-```
+## Jupyter-анализ
 
-Derived:
-
-```text
-age_hours
-views_per_hour = views / age_hours
-like_rate = likes / views
-comment_rate = comments / views
-breakout_ratio = views / subscribers
-```
-
-After a repeated observation:
-
-```text
-growth_views_per_hour =
-(current_views - previous_views) / elapsed_hours
-```
-
-`popularity_score` сейчас простой конфигурируемый heuristic. Это стартовая гипотеза, а не «формула виральности».
-
-Audience retention произвольного чужого видео публичный YouTube Data API не отдаёт. Для своих опубликованных роликов позже можно подключить YouTube Analytics и построить feedback loop с retention/engagement.
-
-## ComfyUI
-
-Кнопка **Comfy JSON** выгружает workflow-agnostic manifest с блоками `source`, `virality` и `comfyui_inputs`.
-
-Это позволяет Дмитрию спокойно менять workflow в ComfyUI, а наш collector не зависит от конкретных node IDs. Когда его workflow стабилизируется, делаем маленький adapter `manifest -> API workflow inputs -> POST /prompt`.
-
-See [`research/comfyui-handoff.md`](research/comfyui-handoff.md).
-
-## Jupyter demo
+Дополнительные зависимости:
 
 ```bash
-pip install -r requirements-research.txt
+python -m pip install -r requirements-research.txt
 jupyter lab
 ```
 
-Open:
+Notebook:
 
 ```text
 notebooks/live_metadata_demo.ipynb
 ```
 
-FastAPI server должен работать в другом terminal. Notebook вызывает локальный backend и строит графики по **реальным API results**.
+Notebook обращается к локальному FastAPI backend, поэтому API key остаётся в `.env` приложения. В нём доступны:
+
+- таблица кандидатов;
+- ranking по `popularity_score`;
+- график `views/hour` против `like rate`;
+- график фактического `growth_views_per_hour` после повторного сбора данных;
+- пример формирования ComfyUI manifest.
 
 ## API
 
-### Search + rank + snapshot
+### Проверка состояния
 
-`POST /api/search`
+```http
+GET /health
+```
+
+### Поиск, фильтрация и snapshot
+
+```http
+POST /api/search
+```
+
+Пример:
 
 ```json
 {
@@ -179,9 +301,11 @@ FastAPI server должен работать в другом terminal. Notebook 
 }
 ```
 
-### Build ComfyUI manifest without downloading
+### Формирование ComfyUI manifest
 
-`POST /api/comfy/manifest`
+```http
+POST /api/comfy/manifest
+```
 
 ```json
 {
@@ -190,9 +314,11 @@ FastAPI server должен работать в другом terminal. Notebook 
 }
 ```
 
-### Download one finalist
+### Скачивание выбранного видео
 
-`POST /api/download`
+```http
+POST /api/download
+```
 
 ```json
 {
@@ -200,30 +326,22 @@ FastAPI server должен работать в другом terminal. Notebook 
 }
 ```
 
-## Architecture
+## Ограничения текущего MVP
 
-```text
-YouTube Data API
-       ↓
-public metadata
-       ↓
-SQLite snapshots ──→ real Δviews/hour
-       ↓
-filter + score
-       ↓
-TOP candidates
-       ↓
-CSV / notebook / ComfyUI manifest
-       ↓
-        ├── metadata workflow → no MP4
-        │
-        └── video-level workflow → yt-dlp only for finalist
-```
+- YouTube Data API не возвращает публичный флаг `isShort`; используется фильтр длительности и `videoDuration=short` на этапе поиска.
+- Для первого наблюдения невозможно вычислить фактический growth rate — требуется минимум два snapshot'а.
+- `popularity_score` пока является эвристикой и требует калибровки на накопленных данных.
+- Audience retention чужих видео недоступен через публичный YouTube Data API.
+- `yt-dlp` зависит от текущего поведения YouTube и периодически требует обновлений.
+- Hypit пока не является частью runtime-пайплайна. Потенциальное применение — структурный анализ небольшого числа выбранных референсов после metadata-first отбора.
 
-## Known limitations
+## Дальнейшее развитие
 
-- YouTube Data API does not expose a public `isShort` flag. We request `videoDuration=short` and apply our own `<= 180s` filter.
-- The first observation cannot have real growth velocity; that requires at least two snapshots.
-- The metadata score is heuristic until we collect enough data to calibrate it.
-- `yt-dlp` can require updates as YouTube changes.
-- Hypit is not a virality oracle. Its useful future role is to decompose the few selected references into structural features / variants after metadata selection.
+Логичные следующие шаги:
+
+- накопление dataset из metadata snapshots;
+- анализ распределений и корреляций в Jupyter;
+- калибровка scoring-функции по фактическим данным;
+- отдельный adapter для стабильного ComfyUI API workflow;
+- подключение YouTube Analytics для собственных опубликованных видео;
+- добавление дополнительных источников данных без изменения основного контракта кандидата.
