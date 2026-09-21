@@ -26,13 +26,13 @@
   <div class="top">
     <div>
       <h1>Shorts Metadata Lab</h1>
-      <p class="muted">Сначала данные, потом скачивание. Реальный YouTube API → ranking → snapshots → JSON для ComfyUI → MP4 только финалистам.</p>
+      <p class="muted">Metadata-first отбор: YouTube API → ranking → snapshots → JSON для downstream workflow → MP4 только при необходимости.</p>
     </div>
     <div id="apiBadge" class="badge"><span class="dot"></span><span>Проверяем API…</span></div>
   </div>
 
   <div class="card">
-    <h2>Живой поиск</h2>
+    <h2>Поиск кандидатов</h2>
     <div class="grid">
       <div class="field" style="grid-column:span 2"><label>Тема</label><input id="query" value="AI tools" placeholder="AI tools"/></div>
       <div class="field"><label>Макс. возраст, ч</label><input id="age" type="number" value="168"/></div>
@@ -47,7 +47,7 @@
       <button class="secondary" onclick="exportCSV()" id="csvBtn" disabled>CSV</button>
       <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
     </div>
-    <p id="status" class="muted small">Первый поиск создаёт snapshot. Повтори тот же запрос через 10–30 минут — появится реальная Δviews/hour.</p>
+    <p id="status" class="muted small">Первый поиск создаёт snapshot. Повторный запрос позже позволит рассчитать фактический Δ views/hour.</p>
   </div>
 
   <div class="stats">
@@ -62,19 +62,19 @@
       <thead><tr>
         <th>Видео</th><th>Возраст</th><th>Views</th><th>Views/h</th><th>Δ views/h</th><th>Like rate</th><th>Comments</th><th>Breakout</th><th>Score</th><th>Действия</th>
       </tr></thead>
-      <tbody id="results"><tr><td colspan="10" class="muted">Запусти поиск — здесь появятся реальные данные.</td></tr></tbody>
+      <tbody id="results"><tr><td colspan="10" class="muted">Выполните поиск для загрузки данных.</td></tr></tbody>
     </table>
   </div>
 
   <div class="card explain">
     <div>
-      <h2>Что показывать Дмитрию</h2>
-      <p class="small muted">Смысл демо — не «мы умеем качать Shorts», а «мы можем отсеять 90–99% роликов без скачивания».</p>
-      <p class="small"><b>Views/h</b> — средняя скорость с публикации. <b>Δ views/h</b> — настоящая скорость между двумя нашими snapshot'ами. <b>Breakout</b> — views / subscribers: ролик относительно размера канала.</p>
+      <h2>Интерпретация метрик</h2>
+      <p class="small muted">Предварительный отбор выполняется по метаданным, поэтому большая часть кандидатов может быть оценена без скачивания исходных видео.</p>
+      <p class="small"><b>Views/h</b> — средняя скорость набора просмотров с момента публикации. <b>Δ views/h</b> — фактическая скорость между двумя snapshot'ами. <b>Breakout</b> — отношение просмотров к числу подписчиков канала.</p>
     </div>
     <div>
-      <h2>ComfyUI handoff</h2>
-      <p class="small muted">Кнопка <b>Comfy JSON</b> выгружает стабильный manifest без MP4. Его можно маппить в inputs API-workflow Дмитрия. Если workflow потребует сам ролик — скачиваем только выбранного финалиста.</p>
+      <h2>ComfyUI integration</h2>
+      <p class="small muted">Кнопка <b>Comfy JSON</b> формирует стабильный manifest без обязательного MP4. Поля manifest можно сопоставить с inputs любого API-format workflow. Если workflow требует исходное видео, MP4 скачивается только для выбранного кандидата.</p>
     </div>
   </div>
 </div>
@@ -96,12 +96,12 @@ async function searchVideos(){
     const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка API');
     currentVideos=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!==null).length;
     $('csvBtn').disabled=!d.videos.length;$('jsonBtn').disabled=!d.videos.length;
-    $('status').textContent=`Готово: ${d.returned} кандидатов. Ничего не скачано. ${d.videos.some(v=>v.growth_views_per_hour!==null)?'Есть повторные snapshots.':'Повтори поиск позже для реальной динамики.'}`;
+    $('status').textContent=`Готово: ${d.returned} кандидатов. MP4 не скачивались. ${d.videos.some(v=>v.growth_views_per_hour!==null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`;
     render(d.videos);
   }catch(e){$('status').className='err small';$('status').textContent=e.message;$('results').innerHTML='<tr><td colspan="10" class="err">'+esc(e.message)+'</td></tr>'}
 }
 function render(videos){
-  if(!videos.length){$('results').innerHTML='<tr><td colspan="10" class="muted">Ничего не прошло фильтры — снизь пороги.</td></tr>';return}
+  if(!videos.length){$('results').innerHTML='<tr><td colspan="10" class="muted">Нет кандидатов, соответствующих заданным фильтрам.</td></tr>';return}
   $('results').innerHTML='';
   for(const v of videos){
     const tr=document.createElement('tr'); const growth=v.growth_views_per_hour;
@@ -118,11 +118,11 @@ function render(videos){
   }
 }
 async function downloadManifest(v,msg){
-  msg.textContent='Готовим manifest…';
-  try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='JSON сохранён, MP4 не нужен'}catch(e){msg.className='small err msg';msg.textContent=e.message}
+  msg.textContent='Формируем manifest…';
+  try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='Manifest сохранён'}catch(e){msg.className='small err msg';msg.textContent=e.message}
 }
 async function downloadVideo(url,msg){
-  if(!confirm('Скачать MP4 этого финалиста? Для metadata-анализа это не требуется.'))return;
+  if(!confirm('Скачать MP4 выбранного кандидата? Для metadata-анализа это не требуется.'))return;
   msg.className='small muted msg';msg.textContent='Скачиваем…';
   try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(d.status!=='completed')throw new Error(d.error||'Ошибка');downloads++;$('downloadHint').textContent=downloads;msg.className='small ok msg';msg.textContent='MP4: '+d.path}catch(e){msg.className='small err msg';msg.textContent=e.message}
 }
