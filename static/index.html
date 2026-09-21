@@ -1,51 +1,139 @@
 <!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>YouTube Shorts MVP</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Shorts Metadata Lab</title>
   <style>
-    body{font-family:Inter,system-ui,sans-serif;margin:0;background:#0b1020;color:#eef2ff}.wrap{max-width:1100px;margin:0 auto;padding:32px}.card{background:#121a2d;border:1px solid #263452;border-radius:16px;padding:18px;margin-bottom:16px}input,button{font:inherit}input{background:#0d1527;color:#fff;border:1px solid #344360;border-radius:9px;padding:10px}button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;background:#7dd3fc;color:#082032;font-weight:700}.row{display:flex;gap:10px;flex-wrap:wrap}.grow{flex:1;min-width:240px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #263452;text-align:left;font-size:13px}.muted{color:#9aa8c5}.ok{color:#86efac}.err{color:#fca5a5}
+    :root{--bg:#0b1020;--panel:#111a2c;--line:#273553;--text:#eef2ff;--muted:#98a7c6;--accent:#7dd3fc;--ok:#86efac;--warn:#fde68a;--err:#fca5a5}
+    *{box-sizing:border-box} body{font-family:Inter,system-ui,sans-serif;margin:0;background:linear-gradient(180deg,#08101f,#0b1020);color:var(--text)}
+    .wrap{max-width:1450px;margin:0 auto;padding:28px}.top{display:flex;gap:18px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap}
+    h1{margin:0;font-size:34px}h2{font-size:18px;margin:0 0 12px}.muted{color:var(--muted)}.small{font-size:12px}.card{background:linear-gradient(180deg,#121b30,#0f1729);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:14px}
+    .badge{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;background:#18243e;font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}
+    .grid{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}.field input{width:100%}
+    input,button{font:inherit}input{background:#0b1324;color:#fff;border:1px solid #344361;border-radius:9px;padding:10px}
+    button{border:0;border-radius:9px;padding:10px 13px;cursor:pointer;background:var(--accent);color:#072031;font-weight:750}.secondary{background:#20304d;color:#dce7ff}.danger{background:#4b2a31;color:#ffd7de}
+    .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{background:#0b1426;border:1px solid #21314e;border-radius:12px;padding:12px}.stat b{font-size:22px;display:block}.stat span{font-size:11px;color:var(--muted)}
+    .tablewrap{overflow:auto;max-height:62vh}table{width:100%;border-collapse:collapse;min-width:1250px}th,td{padding:10px;border-bottom:1px solid #22314d;text-align:left;font-size:12px;vertical-align:top}th{position:sticky;top:0;background:#111a2d;color:#aebbd6;z-index:1}
+    a{color:var(--accent);text-decoration:none}.thumb{width:90px;height:52px;object-fit:cover;border-radius:7px;background:#0a1220}.video{display:flex;gap:10px;min-width:330px}.title{font-weight:700;line-height:1.25}.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
+    .score{font-size:16px;font-weight:800}.bar{height:5px;background:#22314d;border-radius:99px;margin-top:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+    .explain{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media(max-width:900px){.grid,.stats,.explain{grid-template-columns:1fr 1fr}.wrap{padding:16px}}@media(max-width:600px){.grid,.stats,.explain{grid-template-columns:1fr}}
+    code{background:#09111f;padding:2px 5px;border-radius:5px}
   </style>
 </head>
-<body><div class="wrap">
-<h1>YouTube Shorts — zero-budget MVP</h1>
-<p class="muted">Поиск → фильтр → popularity score → скачивание выбранного ролика через yt-dlp.</p>
-<div class="card">
-  <div class="row">
-    <input id="query" class="grow" placeholder="Тема, например: AI news" />
-    <input id="limit" type="number" value="10" min="1" max="50" style="width:90px" />
-    <button onclick="searchVideos()">Найти</button>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>Shorts Metadata Lab</h1>
+      <p class="muted">Сначала данные, потом скачивание. Реальный YouTube API → ranking → snapshots → JSON для ComfyUI → MP4 только финалистам.</p>
+    </div>
+    <div id="apiBadge" class="badge"><span class="dot"></span><span>Проверяем API…</span></div>
   </div>
-  <p id="status" class="muted"></p>
-</div>
-<div class="card" style="overflow:auto"><table>
-<thead><tr><th>Видео</th><th>Views</th><th>Views/h</th><th>Like rate</th><th>Score</th><th></th></tr></thead>
-<tbody id="results"></tbody>
-</table></div>
+
+  <div class="card">
+    <h2>Живой поиск</h2>
+    <div class="grid">
+      <div class="field" style="grid-column:span 2"><label>Тема</label><input id="query" value="AI tools" placeholder="AI tools"/></div>
+      <div class="field"><label>Макс. возраст, ч</label><input id="age" type="number" value="168"/></div>
+      <div class="field"><label>Мин. views</label><input id="views" type="number" value="1000"/></div>
+      <div class="field"><label>Мин. views/h</label><input id="vph" type="number" value="0"/></div>
+      <div class="field"><label>Мин. like rate, %</label><input id="like" type="number" step="0.1" value="0"/></div>
+      <div class="field"><label>Макс. длит., сек</label><input id="duration" type="number" value="180"/></div>
+      <div class="field"><label>Показать TOP</label><input id="limit" type="number" value="15" min="1" max="50"/></div>
+    </div>
+    <div class="actions">
+      <button onclick="searchVideos()">Найти по метаданным</button>
+      <button class="secondary" onclick="exportCSV()" id="csvBtn" disabled>CSV</button>
+      <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
+    </div>
+    <p id="status" class="muted small">Первый поиск создаёт snapshot. Повтори тот же запрос через 10–30 минут — появится реальная Δviews/hour.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="checked">—</b><span>получено от YouTube</span></div>
+    <div class="stat"><b id="passed">—</b><span>прошло фильтры</span></div>
+    <div class="stat"><b id="withGrowth">—</b><span>есть повторный snapshot</span></div>
+    <div class="stat"><b id="downloadHint">0</b><span>MP4 скачано этой сессией</span></div>
+  </div>
+
+  <div class="card tablewrap">
+    <table>
+      <thead><tr>
+        <th>Видео</th><th>Возраст</th><th>Views</th><th>Views/h</th><th>Δ views/h</th><th>Like rate</th><th>Comments</th><th>Breakout</th><th>Score</th><th>Действия</th>
+      </tr></thead>
+      <tbody id="results"><tr><td colspan="10" class="muted">Запусти поиск — здесь появятся реальные данные.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card explain">
+    <div>
+      <h2>Что показывать Дмитрию</h2>
+      <p class="small muted">Смысл демо — не «мы умеем качать Shorts», а «мы можем отсеять 90–99% роликов без скачивания».</p>
+      <p class="small"><b>Views/h</b> — средняя скорость с публикации. <b>Δ views/h</b> — настоящая скорость между двумя нашими snapshot'ами. <b>Breakout</b> — views / subscribers: ролик относительно размера канала.</p>
+    </div>
+    <div>
+      <h2>ComfyUI handoff</h2>
+      <p class="small muted">Кнопка <b>Comfy JSON</b> выгружает стабильный manifest без MP4. Его можно маппить в inputs API-workflow Дмитрия. Если workflow потребует сам ролик — скачиваем только выбранного финалиста.</p>
+    </div>
+  </div>
 </div>
 <script>
-const statusEl=document.getElementById('status');
-const resultsEl=document.getElementById('results');
-function fmt(n){return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
+let currentVideos=[]; let downloads=0;
+const $=id=>document.getElementById(id);
+function fmt(n){if(n===null||n===undefined)return '—';return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
+function pct(n){return n==null?'—':(n*100).toFixed(2)+'%'}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+async function health(){
+  try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube API key подключён'}else{el.querySelector('.dot').style.background='#fca5a5';el.querySelector('span:last-child').textContent='Нужен YOUTUBE_API_KEY'}}
+  catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
+}
 async function searchVideos(){
-  const query=document.getElementById('query').value.trim(); if(!query)return;
-  statusEl.className='muted'; statusEl.textContent='Ищем…'; resultsEl.innerHTML='';
+  $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';$('results').innerHTML='';
+  const body={query:$('query').value.trim(),max_age_hours:+$('age').value,min_views:+$('views').value,min_views_per_hour:+$('vph').value,min_like_rate:+$('like').value/100,max_duration_seconds:+$('duration').value,limit:+$('limit').value};
   try{
-    const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,limit:Number(document.getElementById('limit').value)})});
-    const data=await r.json(); if(!r.ok) throw new Error(data.detail||'Ошибка поиска');
-    statusEl.textContent=`Проверено: ${data.found}, прошло фильтр: ${data.returned}`;
-    for(const v of data.videos){
-      const tr=document.createElement('tr');
-      tr.innerHTML=`<td><a href="${v.url}" target="_blank" style="color:#7dd3fc">${v.title}</a><div class="muted">${v.channel_title}</div></td><td>${fmt(v.views)}</td><td>${fmt(v.views_per_hour)}</td><td>${(v.like_rate*100).toFixed(2)}%</td><td>${v.popularity_score.toFixed(3)}</td><td><button>Скачать</button><div class="muted dl"></div></td>`;
-      tr.querySelector('button').onclick=()=>downloadVideo(v.url,tr.querySelector('.dl'));
-      resultsEl.appendChild(tr);
-    }
-  }catch(e){statusEl.className='err';statusEl.textContent=e.message}
+    const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка API');
+    currentVideos=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!==null).length;
+    $('csvBtn').disabled=!d.videos.length;$('jsonBtn').disabled=!d.videos.length;
+    $('status').textContent=`Готово: ${d.returned} кандидатов. Ничего не скачано. ${d.videos.some(v=>v.growth_views_per_hour!==null)?'Есть повторные snapshots.':'Повтори поиск позже для реальной динамики.'}`;
+    render(d.videos);
+  }catch(e){$('status').className='err small';$('status').textContent=e.message;$('results').innerHTML='<tr><td colspan="10" class="err">'+esc(e.message)+'</td></tr>'}
 }
-async function downloadVideo(url,el){
-  el.className='muted dl';el.textContent='Скачиваем…';
-  try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(d.status!=='completed')throw new Error(d.error||'Ошибка');el.className='ok dl';el.textContent='Готово: '+d.path}catch(e){el.className='err dl';el.textContent=e.message}
+function render(videos){
+  if(!videos.length){$('results').innerHTML='<tr><td colspan="10" class="muted">Ничего не прошло фильтры — снизь пороги.</td></tr>';return}
+  $('results').innerHTML='';
+  for(const v of videos){
+    const tr=document.createElement('tr'); const growth=v.growth_views_per_hour;
+    tr.innerHTML=`
+      <td><div class="video">${v.thumbnail_url?`<img class="thumb" src="${esc(v.thumbnail_url)}">`:''}<div><a class="title" target="_blank" href="${esc(v.url)}">${esc(v.title)}</a><div class="muted">${esc(v.channel_title)} · ${v.duration_seconds}s</div></div></div></td>
+      <td>${v.age_hours.toFixed(1)}h</td><td>${fmt(v.views)}</td><td>${fmt(v.views_per_hour)}</td>
+      <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
+      <td>${pct(v.like_rate)}</td><td>${fmt(v.comments)}</td><td>${v.breakout_ratio==null?'—':v.breakout_ratio.toFixed(2)+'×'}</td>
+      <td><span class="score">${v.popularity_score.toFixed(3)}</span><div class="bar"><i style="width:${Math.min(100,v.popularity_score*100)}%"></i></div></td>
+      <td><div class="actions"><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg"></div></td>`;
+    tr.querySelector('.comfy').onclick=()=>downloadManifest(v,tr.querySelector('.msg'));
+    tr.querySelector('.dl').onclick=()=>downloadVideo(v.url,tr.querySelector('.msg'));
+    $('results').appendChild(tr);
+  }
 }
+async function downloadManifest(v,msg){
+  msg.textContent='Готовим manifest…';
+  try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='JSON сохранён, MP4 не нужен'}catch(e){msg.className='small err msg';msg.textContent=e.message}
+}
+async function downloadVideo(url,msg){
+  if(!confirm('Скачать MP4 этого финалиста? Для metadata-анализа это не требуется.'))return;
+  msg.className='small muted msg';msg.textContent='Скачиваем…';
+  try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(d.status!=='completed')throw new Error(d.error||'Ошибка');downloads++;$('downloadHint').textContent=downloads;msg.className='small ok msg';msg.textContent='MP4: '+d.path}catch(e){msg.className='small err msg';msg.textContent=e.message}
+}
+function saveBlob(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function exportJSON(){saveBlob('youtube-candidates.json',JSON.stringify(currentVideos,null,2),'application/json')}
+function exportCSV(){
+  const cols=['video_id','url','title','channel_title','published_at','duration_seconds','views','likes','comments','subscribers','age_hours','views_per_hour','growth_views_per_hour','like_rate','comment_rate','breakout_ratio','popularity_score'];
+  const q=x=>`"${String(x??'').replaceAll('"','""')}"`; const rows=[cols.join(','),...currentVideos.map(v=>cols.map(c=>q(v[c])).join(','))];
+  saveBlob('youtube-candidates.csv',rows.join('\n'),'text/csv');
+}
+health();
 </script>
-</body></html>
+</body>
+</html>
