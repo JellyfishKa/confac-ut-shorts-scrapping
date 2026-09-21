@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>YouTube Shorts MVP</title>
+  <style>
+    body{font-family:Inter,system-ui,sans-serif;margin:0;background:#0b1020;color:#eef2ff}.wrap{max-width:1100px;margin:0 auto;padding:32px}.card{background:#121a2d;border:1px solid #263452;border-radius:16px;padding:18px;margin-bottom:16px}input,button{font:inherit}input{background:#0d1527;color:#fff;border:1px solid #344360;border-radius:9px;padding:10px}button{border:0;border-radius:9px;padding:10px 14px;cursor:pointer;background:#7dd3fc;color:#082032;font-weight:700}.row{display:flex;gap:10px;flex-wrap:wrap}.grow{flex:1;min-width:240px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #263452;text-align:left;font-size:13px}.muted{color:#9aa8c5}.ok{color:#86efac}.err{color:#fca5a5}
+  </style>
+</head>
+<body><div class="wrap">
+<h1>YouTube Shorts — zero-budget MVP</h1>
+<p class="muted">Поиск → фильтр → popularity score → скачивание выбранного ролика через yt-dlp.</p>
+<div class="card">
+  <div class="row">
+    <input id="query" class="grow" placeholder="Тема, например: AI news" />
+    <input id="limit" type="number" value="10" min="1" max="50" style="width:90px" />
+    <button onclick="searchVideos()">Найти</button>
+  </div>
+  <p id="status" class="muted"></p>
+</div>
+<div class="card" style="overflow:auto"><table>
+<thead><tr><th>Видео</th><th>Views</th><th>Views/h</th><th>Like rate</th><th>Score</th><th></th></tr></thead>
+<tbody id="results"></tbody>
+</table></div>
+</div>
+<script>
+const statusEl=document.getElementById('status');
+const resultsEl=document.getElementById('results');
+function fmt(n){return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
+async function searchVideos(){
+  const query=document.getElementById('query').value.trim(); if(!query)return;
+  statusEl.className='muted'; statusEl.textContent='Ищем…'; resultsEl.innerHTML='';
+  try{
+    const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query,limit:Number(document.getElementById('limit').value)})});
+    const data=await r.json(); if(!r.ok) throw new Error(data.detail||'Ошибка поиска');
+    statusEl.textContent=`Проверено: ${data.found}, прошло фильтр: ${data.returned}`;
+    for(const v of data.videos){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td><a href="${v.url}" target="_blank" style="color:#7dd3fc">${v.title}</a><div class="muted">${v.channel_title}</div></td><td>${fmt(v.views)}</td><td>${fmt(v.views_per_hour)}</td><td>${(v.like_rate*100).toFixed(2)}%</td><td>${v.popularity_score.toFixed(3)}</td><td><button>Скачать</button><div class="muted dl"></div></td>`;
+      tr.querySelector('button').onclick=()=>downloadVideo(v.url,tr.querySelector('.dl'));
+      resultsEl.appendChild(tr);
+    }
+  }catch(e){statusEl.className='err';statusEl.textContent=e.message}
+}
+async function downloadVideo(url,el){
+  el.className='muted dl';el.textContent='Скачиваем…';
+  try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(d.status!=='completed')throw new Error(d.error||'Ошибка');el.className='ok dl';el.textContent='Готово: '+d.path}catch(e){el.className='err dl';el.textContent=e.message}
+}
+</script>
+</body></html>
