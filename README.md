@@ -15,6 +15,7 @@ Metadata-first MVP для поиска, ранжирования и выборо
 - экспорт результатов в CSV и JSON;
 - формирование нейтрального JSON-manifest для передачи данных в ComfyUI;
 - выборочное скачивание финалистов через `yt-dlp`;
+- анализ сюжета выбранного публичного YouTube Shorts через Gemini с экспортом JSON;
 - Jupyter Notebook для анализа результатов и построения графиков.
 
 ## Архитектура
@@ -172,6 +173,7 @@ cp .env.example .env
 
 ```env
 YOUTUBE_API_KEY=your_key_here
+GEMINI_API_KEY=your_gemini_key_here
 ```
 
 Запуск:
@@ -185,6 +187,8 @@ python -m uvicorn app.main:app --reload
 ```text
 http://127.0.0.1:8000
 ```
+
+Кнопка **Сюжет** у найденного ролика отправляет его публичную YouTube-ссылку в Gemini Video Understanding и показывает хронологическое описание. Результат можно скопировать или скачать в JSON. `GEMINI_API_KEY` хранится только на сервере в `.env`; без него интерфейс покажет понятную ошибку. Анализ может занимать время и расходовать квоту Gemini. Доступность зависит от прав и доступности ролика для Gemini; таймкоды и факты следует проверить по оригиналу. MP4 для этого действия не скачивается.
 
 ## Получение YouTube Data API key
 
@@ -318,6 +322,18 @@ POST /api/comfy/manifest
 
 ```http
 POST /api/download
+```
+
+```json
+{
+  "url": "https://www.youtube.com/shorts/VIDEO_ID"
+}
+```
+
+### Сюжет выбранного видео
+
+```http
+POST /api/story
 ```
 
 ```json
