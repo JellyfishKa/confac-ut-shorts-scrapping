@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     youtube_api_key: str = ""
+    gemini_api_key: str = ""
     download_dir: Path = Path("downloads")
     data_dir: Path = Path("data")
     max_results: int = 50

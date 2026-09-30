@@ -14,7 +14,10 @@ from app.models import (
     DownloadResponse,
     SearchRequest,
     SearchResponse,
+    StoryRequest,
+    StoryResponse,
 )
+from app.story import create_story
 from app.youtube import YouTubeProvider
 
 app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0")
@@ -58,6 +61,11 @@ def comfy_manifest(request: ComfyManifestRequest) -> ComfyManifestResponse:
     return ComfyManifestResponse(
         manifest=build_comfy_manifest(request.video, request.local_video_path)
     )
+
+
+@app.post("/api/story", response_model=StoryResponse)
+async def story(request: StoryRequest) -> StoryResponse:
+    return await create_story(request)
 
 
 @app.post("/api/download", response_model=DownloadResponse)

@@ -58,6 +58,16 @@ class DownloadResponse(BaseModel):
     error: str | None = None
 
 
+class StoryRequest(BaseModel):
+    url: HttpUrl
+
+
+class StoryResponse(BaseModel):
+    url: str
+    model: str
+    story: str
+
+
 class ComfyManifestRequest(BaseModel):
     video: VideoCandidate
     local_video_path: str | None = None
