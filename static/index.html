@@ -19,6 +19,7 @@
     .score{font-size:16px;font-weight:800}.bar{height:5px;background:#22314d;border-radius:99px;margin-top:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
     .explain{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media(max-width:900px){.grid,.stats,.explain{grid-template-columns:1fr 1fr}.wrap{padding:16px}}@media(max-width:600px){.grid,.stats,.explain{grid-template-columns:1fr}}
     code{background:#09111f;padding:2px 5px;border-radius:5px}
+    #storyText{white-space:pre-wrap;line-height:1.55;max-height:50vh;overflow:auto}
   </style>
 </head>
 <body>
@@ -66,6 +67,17 @@
     </table>
   </div>
 
+  <div class="card" id="storyPanel" hidden>
+    <h2>Сюжет выбранного видео</h2>
+    <p id="storySource" class="small muted"></p>
+    <p id="storyStatus" class="small muted"></p>
+    <div id="storyText"></div>
+    <div class="actions">
+      <button class="secondary" id="storyCopy" onclick="copyStory()" disabled>Копировать JSON</button>
+      <button class="secondary" id="storySave" onclick="saveStory()" disabled>Скачать JSON</button>
+    </div>
+  </div>
+
   <div class="card explain">
     <div>
       <h2>Интерпретация метрик</h2>
@@ -79,7 +91,7 @@
   </div>
 </div>
 <script>
-let currentVideos=[]; let downloads=0;
+let currentVideos=[]; let downloads=0; let currentStory=null; let storyRequestId=0;
 const $=id=>document.getElementById(id);
 function fmt(n){if(n===null||n===undefined)return '—';return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
 function pct(n){return n==null?'—':(n*100).toFixed(2)+'%'}
@@ -89,6 +101,7 @@ async function health(){
   catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
 }
 async function searchVideos(){
+  storyRequestId++;$('storyPanel').hidden=true;currentStory=null;
   $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';$('results').innerHTML='';
   const body={query:$('query').value.trim(),max_age_hours:+$('age').value,min_views:+$('views').value,min_views_per_hour:+$('vph').value,min_like_rate:+$('like').value/100,max_duration_seconds:+$('duration').value,limit:+$('limit').value};
   try{
@@ -111,12 +124,33 @@ function render(videos){
       <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
       <td>${pct(v.like_rate)}</td><td>${fmt(v.comments)}</td><td>${v.breakout_ratio==null?'—':v.breakout_ratio.toFixed(2)+'×'}</td>
       <td><span class="score">${v.popularity_score.toFixed(3)}</span><div class="bar"><i style="width:${Math.min(100,v.popularity_score*100)}%"></i></div></td>
-      <td><div class="actions"><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg"></div></td>`;
+      <td><div class="actions"><button class="secondary story">Сюжет</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg"></div></td>`;
+    tr.querySelector('.story').onclick=()=>generateStory(v);
     tr.querySelector('.comfy').onclick=()=>downloadManifest(v,tr.querySelector('.msg'));
     tr.querySelector('.dl').onclick=()=>downloadVideo(v.url,tr.querySelector('.msg'));
     $('results').appendChild(tr);
   }
 }
+async function generateStory(v){
+  const requestId=++storyRequestId;
+  const panel=$('storyPanel');panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});
+  $('storySource').textContent=v.title+' · '+v.url;
+  $('storyText').textContent='';$('storyStatus').className='small muted';$('storyStatus').textContent='Анализируем видео через Gemini…';
+  $('storyCopy').disabled=true;$('storySave').disabled=true;currentStory=null;
+  try{
+    const r=await fetch('/api/story',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v.url})});
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Не удалось получить сюжет');
+    if(requestId!==storyRequestId)return;
+    currentStory=d;$('storyText').textContent=d.story;$('storyStatus').textContent='Готово · '+d.model;
+    $('storyCopy').disabled=false;$('storySave').disabled=false;
+  }catch(e){if(requestId!==storyRequestId)return;$('storyStatus').className='small err';$('storyStatus').textContent=e.message}
+}
+async function copyStory(){
+  if(!currentStory)return;
+  try{await navigator.clipboard.writeText(JSON.stringify(currentStory,null,2));$('storyStatus').textContent='JSON скопирован'}
+  catch(e){$('storyStatus').className='small err';$('storyStatus').textContent='Не удалось скопировать. Используйте скачивание JSON.'}
+}
+function saveStory(){if(currentStory)saveBlob(`${new URL(currentStory.url).pathname.split('/').filter(Boolean).pop()}.story.json`,JSON.stringify(currentStory,null,2),'application/json')}
 async function downloadManifest(v,msg){
   msg.textContent='Формируем manifest…';
   try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='Manifest сохранён'}catch(e){msg.className='small err msg';msg.textContent=e.message}
