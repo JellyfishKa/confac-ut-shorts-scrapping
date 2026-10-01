@@ -157,6 +157,12 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
+В Windows PowerShell можно обойтись без активации и гарантированно установить пакеты именно в окружение проекта:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
 Создание `.env`:
 
 ```powershell
@@ -181,6 +187,14 @@ GEMINI_API_KEY=your_gemini_key_here
 ```bash
 python -m uvicorn app.main:app --reload
 ```
+
+Для Windows PowerShell надёжнее запускать Python из `.venv` напрямую:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app
+```
+
+Команда `py -m ...` может выбрать глобальный Python даже после активации `.venv`. Проверить используемый интерпретатор можно командой `.\.venv\Scripts\python.exe -c "import sys; print(sys.executable)"`; путь должен содержать `.venv` этого проекта.
 
 Интерфейс будет доступен по адресу:
 
