@@ -96,17 +96,26 @@ const $=id=>document.getElementById(id);
 function fmt(n){if(n===null||n===undefined)return '—';return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
 function pct(n){return n==null?'—':(n*100).toFixed(2)+'%'}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function optionalNumber(id){const value=$(id).value.trim();return value===''?null:Number(value)}
+function apiError(detail){
+  if(!Array.isArray(detail))return detail||'Ошибка API';
+  const names={query:'Тема',max_age_hours:'Макс. возраст',min_views:'Мин. views',min_views_per_hour:'Мин. views/h',min_like_rate:'Мин. like rate',max_duration_seconds:'Макс. длительность',limit:'Показать TOP'};
+  return detail.map(e=>`${names[e.loc?.at(-1)]||e.loc?.at(-1)||'Поле'}: ${e.msg||'неверное значение'}`).join('; ');
+}
 async function health(){
   try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube API key подключён'}else{el.querySelector('.dot').style.background='#fca5a5';el.querySelector('span:last-child').textContent='Нужен YOUTUBE_API_KEY'}}
   catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
 }
 async function searchVideos(){
   storyRequestId++;$('storyPanel').hidden=true;currentStory=null;
+  const query=$('query').value.trim();
+  if(!query){$('status').className='err small';$('status').textContent='Укажите тему для поиска.';return}
   $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';$('results').innerHTML='';
-  const body={query:$('query').value.trim(),max_age_hours:+$('age').value,min_views:+$('views').value,min_views_per_hour:+$('vph').value,min_like_rate:+$('like').value/100,max_duration_seconds:+$('duration').value,limit:+$('limit').value};
+  const like=optionalNumber('like');
+  const body={query,max_age_hours:optionalNumber('age'),min_views:optionalNumber('views'),min_views_per_hour:optionalNumber('vph'),min_like_rate:like===null?null:like/100,max_duration_seconds:optionalNumber('duration'),limit:optionalNumber('limit')??10};
   try{
     const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка API');
+    const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
     currentVideos=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!==null).length;
     $('csvBtn').disabled=!d.videos.length;$('jsonBtn').disabled=!d.videos.length;
     $('status').textContent=`Готово: ${d.returned} кандидатов. MP4 не скачивались. ${d.videos.some(v=>v.growth_views_per_hour!==null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`;
