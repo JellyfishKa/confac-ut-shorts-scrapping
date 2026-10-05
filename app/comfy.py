@@ -9,7 +9,7 @@ def build_comfy_manifest(video: VideoCandidate, local_video_path: str | None = N
         "schema_version": "0.2",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": {
-            "platform": "youtube",
+            "platform": video.platform,
             "video_id": video.video_id,
             "url": video.url,
             "local_video_path": local_video_path,
@@ -18,7 +18,7 @@ def build_comfy_manifest(video: VideoCandidate, local_video_path: str | None = N
             "channel_id": video.channel_id,
             "channel_title": video.channel_title,
             "thumbnail_url": video.thumbnail_url,
-            "published_at": video.published_at.isoformat(),
+            "published_at": video.published_at.isoformat() if video.published_at else None,
             "duration_seconds": video.duration_seconds,
         },
         "virality": {
@@ -54,8 +54,8 @@ def build_comfy_manifest(video: VideoCandidate, local_video_path: str | None = N
             "virality_score": video.popularity_score,
             "views_per_hour": video.views_per_hour,
             "growth_views_per_hour": video.growth_views_per_hour,
-            "like_rate_pct": round(video.like_rate * 100, 3),
-            "comment_rate_pct": round(video.comment_rate * 100, 3),
+            "like_rate_pct": round(video.like_rate * 100, 3) if video.like_rate is not None else None,
+            "comment_rate_pct": round(video.comment_rate * 100, 3) if video.comment_rate is not None else None,
             "breakout_ratio": video.breakout_ratio,
         },
     }

@@ -16,28 +16,29 @@ class SearchRequest(BaseModel):
 
 class VideoCandidate(BaseModel):
     video_id: str
+    platform: str = "youtube"
     url: str
     title: str
     description: str = ""
     channel_id: str = ""
     channel_title: str
     thumbnail_url: str | None = None
-    published_at: datetime
-    duration_seconds: int
-    views: int
-    likes: int
-    comments: int
+    published_at: datetime | None
+    duration_seconds: int | None
+    views: int | None
+    likes: int | None
+    comments: int | None
     subscribers: int | None = None
-    age_hours: float
-    views_per_hour: float
-    like_rate: float
-    comment_rate: float
+    age_hours: float | None
+    views_per_hour: float | None
+    like_rate: float | None
+    comment_rate: float | None
     breakout_ratio: float | None = None
     previous_views: int | None = None
     growth_views_per_hour: float | None = None
     growth_likes_per_hour: float | None = None
     snapshot_age_minutes: float | None = None
-    popularity_score: float
+    popularity_score: float | None
 
 
 class SearchResponse(BaseModel):
@@ -45,6 +46,14 @@ class SearchResponse(BaseModel):
     found: int
     returned: int
     videos: list[VideoCandidate]
+
+
+class ImportRequest(BaseModel):
+    url: HttpUrl
+
+
+class ImportResponse(BaseModel):
+    video: VideoCandidate
 
 
 class DownloadRequest(BaseModel):

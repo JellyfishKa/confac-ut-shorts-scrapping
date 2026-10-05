@@ -7,11 +7,14 @@ from fastapi.staticfiles import StaticFiles
 from app.comfy import build_comfy_manifest
 from app.config import settings
 from app.downloader import VideoDownloader
+from app.import_video import import_video
 from app.models import (
     ComfyManifestRequest,
     ComfyManifestResponse,
     DownloadRequest,
     DownloadResponse,
+    ImportRequest,
+    ImportResponse,
     SearchRequest,
     SearchResponse,
     StoryRequest,
@@ -66,6 +69,11 @@ def comfy_manifest(request: ComfyManifestRequest) -> ComfyManifestResponse:
 @app.post("/api/story", response_model=StoryResponse)
 async def story(request: StoryRequest) -> StoryResponse:
     return await create_story(request)
+
+
+@app.post("/api/import", response_model=ImportResponse)
+async def import_video_url(request: ImportRequest) -> ImportResponse:
+    return await import_video(request)
 
 
 @app.post("/api/download", response_model=DownloadResponse)
