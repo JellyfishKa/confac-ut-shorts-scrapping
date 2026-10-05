@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Shorts Metadata Lab</title>
+  <title>Видео: поиск и анализ</title>
   <style>
     :root{--bg:#0b1020;--panel:#111a2c;--line:#273553;--text:#eef2ff;--muted:#98a7c6;--accent:#7dd3fc;--ok:#86efac;--warn:#fde68a;--err:#fca5a5}
     *{box-sizing:border-box} body{font-family:Inter,system-ui,sans-serif;margin:0;background:linear-gradient(180deg,#08101f,#0b1020);color:var(--text)}
@@ -26,8 +26,8 @@
 <div class="wrap">
   <div class="top">
     <div>
-      <h1>Shorts Metadata Lab</h1>
-      <p class="muted">Metadata-first отбор: YouTube API → ranking → snapshots → JSON для downstream workflow → MP4 только при необходимости.</p>
+      <h1>Видео: поиск и анализ</h1>
+      <p class="muted">Поиск по теме работает для YouTube; видео из VK, TikTok, Instagram и Rutube добавляются по прямой ссылке. Результаты собираются в одной таблице для анализа и экспорта.</p>
     </div>
     <div id="apiBadge" class="badge"><span class="dot"></span><span>Проверяем API…</span></div>
   </div>
@@ -48,7 +48,16 @@
       <button class="secondary" onclick="exportCSV()" id="csvBtn" disabled>CSV</button>
       <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
     </div>
+    <p class="small muted">Поиск по теме сейчас работает для YouTube. У выбранного ролика можно запросить сюжет и сохранить результат в JSON.</p>
     <p id="status" class="muted small">Первый поиск создаёт snapshot. Повторный запрос позже позволит рассчитать фактический Δ views/hour.</p>
+  </div>
+
+  <div class="card">
+    <h2>Добавить ролик по ссылке</h2>
+    <p class="small muted">Публичные ссылки на VK Клипы, TikTok, Instagram Reels и Rutube Shorts. Это добавление отдельного ролика; поиск по теме для этих площадок пока не подключён.</p>
+    <div class="field"><label for="importUrl">Ссылка на видео</label><input id="importUrl" type="url" placeholder="https://..." style="width:100%"/></div>
+    <div class="actions"><button id="importBtn" onclick="importVideo()">Добавить в таблицу</button></div>
+    <p id="importStatus" class="small muted" role="status">Недоступные показатели останутся пустыми.</p>
   </div>
 
   <div class="stats">
@@ -63,12 +72,13 @@
       <thead><tr>
         <th>Видео</th><th>Возраст</th><th>Views</th><th>Views/h</th><th>Δ views/h</th><th>Like rate</th><th>Comments</th><th>Breakout</th><th>Score</th><th>Действия</th>
       </tr></thead>
-      <tbody id="results"><tr><td colspan="10" class="muted">Выполните поиск для загрузки данных.</td></tr></tbody>
+      <tbody id="results"><tr><td colspan="10" class="muted">Найдите видео по теме или добавьте ссылку.</td></tr></tbody>
     </table>
   </div>
 
   <div class="card" id="storyPanel" hidden>
     <h2>Сюжет выбранного видео</h2>
+    <p class="small muted">Gemini описывает увиденное и услышанное в ролике. Реплики в таком описании могут быть пересказом: для точных слов и таймкодов понадобится отдельная расшифровка речи.</p>
     <p id="storySource" class="small muted"></p>
     <p id="storyStatus" class="small muted"></p>
     <div id="storyText"></div>
@@ -87,14 +97,26 @@
     <div>
       <h2>ComfyUI integration</h2>
       <p class="small muted">Кнопка <b>Comfy JSON</b> формирует стабильный manifest без обязательного MP4. Поля manifest можно сопоставить с inputs любого API-format workflow. Если workflow требует исходное видео, MP4 скачивается только для выбранного кандидата.</p>
+      <p class="small muted"><b>Следующий шаг:</b> добавить расшифровку реплик с таймкодами и передавать её вместе с сюжетом в AutoClip для подготовки клипов.</p>
     </div>
   </div>
 </div>
 <script>
-let currentVideos=[]; let downloads=0; let currentStory=null; let storyRequestId=0;
+let currentVideos=[]; let searchResults=[]; let importedVideos=[]; let downloads=0; let currentStory=null; let storyRequestId=0;
 const $=id=>document.getElementById(id);
 function fmt(n){if(n===null||n===undefined)return '—';return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
 function pct(n){return n==null?'—':(n*100).toFixed(2)+'%'}
+function fixed(n,digits=1){return n==null?'—':Number(n).toFixed(digits)}
+function platformName(v){return ({youtube:'YouTube',vk:'VK Клипы',tiktok:'TikTok',instagram:'Instagram Reels',rutube:'Rutube Shorts'})[v.platform]||v.platform||'Видео'}
+function refreshVideos(){
+  const seen=new Set();currentVideos=[];
+  for(const video of [...importedVideos,...searchResults]){
+    const key=video.url||`${video.platform}:${video.video_id}`;
+    if(!seen.has(key)){seen.add(key);currentVideos.push(video)}
+  }
+  $('csvBtn').disabled=!currentVideos.length;$('jsonBtn').disabled=!currentVideos.length;
+  render(currentVideos);
+}
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 function optionalNumber(id){const value=$(id).value.trim();return value===''?null:Number(value)}
 function apiError(detail){
@@ -110,31 +132,44 @@ async function searchVideos(){
   storyRequestId++;$('storyPanel').hidden=true;currentStory=null;
   const query=$('query').value.trim();
   if(!query){$('status').className='err small';$('status').textContent='Укажите тему для поиска.';return}
-  $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';$('results').innerHTML='';
+  $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';
   const like=optionalNumber('like');
   const body={query,max_age_hours:optionalNumber('age'),min_views:optionalNumber('views'),min_views_per_hour:optionalNumber('vph'),min_like_rate:like===null?null:like/100,max_duration_seconds:optionalNumber('duration'),limit:optionalNumber('limit')??10};
   try{
     const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
-    currentVideos=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!==null).length;
-    $('csvBtn').disabled=!d.videos.length;$('jsonBtn').disabled=!d.videos.length;
-    $('status').textContent=`Готово: ${d.returned} кандидатов. MP4 не скачивались. ${d.videos.some(v=>v.growth_views_per_hour!==null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`;
-    render(d.videos);
-  }catch(e){$('status').className='err small';$('status').textContent=e.message;$('results').innerHTML='<tr><td colspan="10" class="err">'+esc(e.message)+'</td></tr>'}
+    searchResults=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!=null).length;
+    $('status').textContent=`Готово: ${d.returned} кандидатов. MP4 не скачивались. ${d.videos.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`;
+    refreshVideos();
+  }catch(e){$('status').className='err small';$('status').textContent=e.message}
+}
+async function importVideo(){
+  const raw=$('importUrl').value.trim();const status=$('importStatus');
+  try{const parsed=new URL(raw);if(!['http:','https:'].includes(parsed.protocol))throw new Error('Нужна ссылка на видео.')}catch(e){status.className='small err';status.textContent='Введите корректную ссылку на видео.';return}
+  const button=$('importBtn');button.disabled=true;status.className='small muted';status.textContent='Получаем доступные данные о видео…';
+  try{
+    const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:raw})});
+    const data=await response.json();if(!response.ok)throw new Error(apiError(data.detail));
+    const video=data.video;if(!video||!video.url)throw new Error('Сервис не вернул данные о видео.');
+    importedVideos=importedVideos.filter(v=>v.url!==video.url);importedVideos.unshift(video);refreshVideos();
+    status.className='small ok';status.textContent=`Добавлено: ${platformName(video)} · ${video.title}`;
+    $('importUrl').value='';
+  }catch(e){status.className='small err';status.textContent=e.message}
+  finally{button.disabled=false}
 }
 function render(videos){
-  if(!videos.length){$('results').innerHTML='<tr><td colspan="10" class="muted">Нет кандидатов, соответствующих заданным фильтрам.</td></tr>';return}
+  if(!videos.length){$('results').innerHTML='<tr><td colspan="10" class="muted">Нет видео в таблице. Измените фильтры поиска или добавьте ссылку.</td></tr>';return}
   $('results').innerHTML='';
   for(const v of videos){
     const tr=document.createElement('tr'); const growth=v.growth_views_per_hour;
     tr.innerHTML=`
-      <td><div class="video">${v.thumbnail_url?`<img class="thumb" src="${esc(v.thumbnail_url)}">`:''}<div><a class="title" target="_blank" href="${esc(v.url)}">${esc(v.title)}</a><div class="muted">${esc(v.channel_title)} · ${v.duration_seconds}s</div></div></div></td>
-      <td>${v.age_hours.toFixed(1)}h</td><td>${fmt(v.views)}</td><td>${fmt(v.views_per_hour)}</td>
+      <td><div class="video">${v.thumbnail_url?`<img class="thumb" src="${esc(v.thumbnail_url)}">`:''}<div><a class="title" target="_blank" rel="noopener noreferrer" href="${esc(v.url)}">${esc(v.title)}</a><div class="muted">${esc(platformName(v))} · ${esc(v.channel_title||'Автор неизвестен')}${v.duration_seconds==null?'':' · '+fixed(v.duration_seconds,0)+' с'}</div></div></div></td>
+      <td>${v.age_hours==null?'—':fixed(v.age_hours)+' ч'}</td><td>${fmt(v.views)}</td><td>${fmt(v.views_per_hour)}</td>
       <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
-      <td>${pct(v.like_rate)}</td><td>${fmt(v.comments)}</td><td>${v.breakout_ratio==null?'—':v.breakout_ratio.toFixed(2)+'×'}</td>
-      <td><span class="score">${v.popularity_score.toFixed(3)}</span><div class="bar"><i style="width:${Math.min(100,v.popularity_score*100)}%"></i></div></td>
-      <td><div class="actions"><button class="secondary story">Сюжет</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg"></div></td>`;
-    tr.querySelector('.story').onclick=()=>generateStory(v);
+      <td>${pct(v.like_rate)}</td><td>${fmt(v.comments)}</td><td>${v.breakout_ratio==null?'—':fixed(v.breakout_ratio,2)+'×'}</td>
+      <td>${v.popularity_score==null?'—':`<span class="score">${fixed(v.popularity_score,3)}</span><div class="bar"><i style="width:${Math.min(100,v.popularity_score*100)}%"></i></div>`}</td>
+      <td><div class="actions"><button class="secondary story" ${v.platform&&v.platform!=='youtube'?'disabled title="Сюжет пока доступен только для YouTube"':''}>${v.platform&&v.platform!=='youtube'?'Сюжет позже':'Сюжет'}</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg">${v.platform&&v.platform!=='youtube'?'Сюжет пока доступен только для YouTube.':''}</div></td>`;
+    if(!v.platform||v.platform==='youtube')tr.querySelector('.story').onclick=()=>generateStory(v);
     tr.querySelector('.comfy').onclick=()=>downloadManifest(v,tr.querySelector('.msg'));
     tr.querySelector('.dl').onclick=()=>downloadVideo(v.url,tr.querySelector('.msg'));
     $('results').appendChild(tr);
@@ -162,7 +197,7 @@ async function copyStory(){
 function saveStory(){if(currentStory)saveBlob(`${new URL(currentStory.url).pathname.split('/').filter(Boolean).pop()}.story.json`,JSON.stringify(currentStory,null,2),'application/json')}
 async function downloadManifest(v,msg){
   msg.textContent='Формируем manifest…';
-  try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='Manifest сохранён'}catch(e){msg.className='small err msg';msg.textContent=e.message}
+  try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.platform||'youtube'}-${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='Manifest сохранён'}catch(e){msg.className='small err msg';msg.textContent=e.message}
 }
 async function downloadVideo(url,msg){
   if(!confirm('Скачать MP4 выбранного кандидата? Для metadata-анализа это не требуется.'))return;
@@ -170,11 +205,11 @@ async function downloadVideo(url,msg){
   try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=await r.json();if(d.status!=='completed')throw new Error(d.error||'Ошибка');downloads++;$('downloadHint').textContent=downloads;msg.className='small ok msg';msg.textContent='MP4: '+d.path}catch(e){msg.className='small err msg';msg.textContent=e.message}
 }
 function saveBlob(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-function exportJSON(){saveBlob('youtube-candidates.json',JSON.stringify(currentVideos,null,2),'application/json')}
+function exportJSON(){saveBlob('video-candidates.json',JSON.stringify(currentVideos,null,2),'application/json')}
 function exportCSV(){
-  const cols=['video_id','url','title','channel_title','published_at','duration_seconds','views','likes','comments','subscribers','age_hours','views_per_hour','growth_views_per_hour','like_rate','comment_rate','breakout_ratio','popularity_score'];
+  const cols=['platform','video_id','url','title','channel_title','published_at','duration_seconds','views','likes','comments','subscribers','age_hours','views_per_hour','growth_views_per_hour','like_rate','comment_rate','breakout_ratio','popularity_score'];
   const q=x=>`"${String(x??'').replaceAll('"','""')}"`; const rows=[cols.join(','),...currentVideos.map(v=>cols.map(c=>q(v[c])).join(','))];
-  saveBlob('youtube-candidates.csv',rows.join('\n'),'text/csv');
+  saveBlob('video-candidates.csv',rows.join('\n'),'text/csv');
 }
 health();
 </script>
