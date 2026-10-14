@@ -1,8 +1,23 @@
 from pathlib import Path
+from threading import Lock
 
 from yt_dlp import YoutubeDL
 
 from app.config import settings
+
+
+_downloaded_paths: dict[str, Path] = {}
+_downloaded_lock = Lock()
+
+
+def remember_download(url: str, path: str) -> None:
+    with _downloaded_lock:
+        _downloaded_paths[url] = Path(path).resolve()
+
+
+def was_downloaded_for(url: str, path: Path) -> bool:
+    with _downloaded_lock:
+        return _downloaded_paths.get(url) == path
 
 
 class VideoDownloader:

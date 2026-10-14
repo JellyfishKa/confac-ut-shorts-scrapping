@@ -87,6 +87,7 @@ class DownloadResponse(BaseModel):
 
 class StoryRequest(BaseModel):
     url: HttpUrl
+    local_video_path: str | None = None
 
 
 class StoryResponse(BaseModel):

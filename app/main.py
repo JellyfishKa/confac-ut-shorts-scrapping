@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.comfy import build_comfy_manifest
 from app.config import settings
-from app.downloader import VideoDownloader
+from app.downloader import VideoDownloader, remember_download
 from app.import_video import import_video
 from app.models import (
     ComfyManifestRequest,
@@ -136,6 +136,7 @@ async def import_video_url(request: ImportRequest) -> ImportResponse:
 def download_video(request: DownloadRequest) -> DownloadResponse:
     try:
         video_id, path = VideoDownloader().download(str(request.url))
+        remember_download(str(request.url), path)
         return DownloadResponse(status="completed", video_id=video_id, path=path)
     except Exception as exc:
         return DownloadResponse(status="failed", error=str(exc))
