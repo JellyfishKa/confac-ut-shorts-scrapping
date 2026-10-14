@@ -17,6 +17,8 @@
     .tablewrap{overflow:auto;max-height:62vh}table{width:100%;border-collapse:collapse;min-width:1250px}th,td{padding:10px;border-bottom:1px solid #22314d;text-align:left;font-size:12px;vertical-align:top}th{position:sticky;top:0;background:#111a2d;color:#aebbd6;z-index:1}
     a{color:var(--accent);text-decoration:none}.thumb{width:90px;height:52px;object-fit:cover;border-radius:7px;background:#0a1220}.video{display:flex;gap:10px;min-width:330px}.title{font-weight:700;line-height:1.25}.ok{color:var(--ok)}.err{color:var(--err)}.warn{color:var(--warn)}
     .score{font-size:16px;font-weight:800}.bar{height:5px;background:#22314d;border-radius:99px;margin-top:5px;overflow:hidden}.bar i{display:block;height:100%;background:var(--accent)}
+    .platforms{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.platform-choice{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:9px;padding:8px 11px;background:#0b1426;cursor:pointer;font-size:13px}.platform-choice input{width:auto;margin:0;accent-color:var(--accent)}
+    .platform-statuses{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}.platform-statuses span{border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px;background:#0b1426}
     .explain{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media(max-width:900px){.grid,.stats,.explain{grid-template-columns:1fr 1fr}.wrap{padding:16px}}@media(max-width:600px){.grid,.stats,.explain{grid-template-columns:1fr}}
     code{background:#09111f;padding:2px 5px;border-radius:5px}
     #storyText{white-space:pre-wrap;line-height:1.55;max-height:50vh;overflow:auto}
@@ -27,7 +29,7 @@
   <div class="top">
     <div>
       <h1>Видео: поиск и анализ</h1>
-      <p class="muted">Поиск по теме работает для YouTube; видео из VK, TikTok, Instagram и Rutube добавляются по прямой ссылке. Результаты собираются в одной таблице для анализа и экспорта.</p>
+      <p class="muted">Собирайте ролики по теме с выбранных площадок и сравнивайте их в одной таблице. Доступность поиска зависит от бесплатного API каждой площадки.</p>
     </div>
     <div id="apiBadge" class="badge"><span class="dot"></span><span>Проверяем API…</span></div>
   </div>
@@ -37,31 +39,39 @@
     <div class="grid">
       <div class="field" style="grid-column:span 2"><label>Тема</label><input id="query" value="AI tools" placeholder="AI tools"/></div>
       <div class="field"><label>Макс. возраст, ч</label><input id="age" type="number" value="168"/></div>
-      <div class="field"><label>Мин. views</label><input id="views" type="number" value="1000"/></div>
+      <div class="field"><label>Мин. views</label><input id="views" type="number" min="0" value="0"/></div>
       <div class="field"><label>Мин. views/h</label><input id="vph" type="number" value="0"/></div>
       <div class="field"><label>Мин. like rate, %</label><input id="like" type="number" step="0.1" value="0"/></div>
       <div class="field"><label>Макс. длит., сек</label><input id="duration" type="number" value="180"/></div>
       <div class="field"><label>Показать TOP</label><input id="limit" type="number" value="15" min="1" max="50"/></div>
+    </div>
+    <div class="platforms" role="group" aria-label="Площадки для поиска">
+      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="youtube" checked/>YouTube Shorts</label>
+      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="vk"/>VK Клипы</label>
+      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="tiktok"/>TikTok</label>
+      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="instagram"/>Instagram Reels</label>
+      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="rutube"/>Rutube</label>
     </div>
     <div class="actions">
       <button onclick="searchVideos()">Найти по метаданным</button>
       <button class="secondary" onclick="exportCSV()" id="csvBtn" disabled>CSV</button>
       <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
     </div>
-    <p class="small muted">Поиск по теме сейчас работает для YouTube. У выбранного ролика можно запросить сюжет и сохранить результат в JSON.</p>
+    <p class="small muted">Для Instagram укажите один хештег в поле «Тема». Если площадка требует доступ или ограничивает поиск, причина появится после запроса. Ссылку на отдельный ролик можно добавить ниже.</p>
     <p id="status" class="muted small">Первый поиск создаёт snapshot. Повторный запрос позже позволит рассчитать фактический Δ views/hour.</p>
+    <div id="platformStatuses" class="platform-statuses" role="status"></div>
   </div>
 
   <div class="card">
     <h2>Добавить ролик по ссылке</h2>
-    <p class="small muted">Публичные ссылки на VK Клипы, TikTok, Instagram Reels и Rutube Shorts. Это добавление отдельного ролика; поиск по теме для этих площадок пока не подключён.</p>
+    <p class="small muted">Публичные ссылки на VK Клипы, TikTok, Instagram Reels и Rutube. Ручное добавление полезно, если поиск на площадке недоступен.</p>
     <div class="field"><label for="importUrl">Ссылка на видео</label><input id="importUrl" type="url" placeholder="https://..." style="width:100%"/></div>
     <div class="actions"><button id="importBtn" onclick="importVideo()">Добавить в таблицу</button></div>
     <p id="importStatus" class="small muted" role="status">Недоступные показатели останутся пустыми.</p>
   </div>
 
   <div class="stats">
-    <div class="stat"><b id="checked">—</b><span>получено от YouTube</span></div>
+    <div class="stat"><b id="checked">—</b><span>получено для проверки</span></div>
     <div class="stat"><b id="passed">—</b><span>прошло фильтры</span></div>
     <div class="stat"><b id="withGrowth">—</b><span>есть повторный snapshot</span></div>
     <div class="stat"><b id="downloadHint">0</b><span>MP4 скачано этой сессией</span></div>
@@ -110,8 +120,8 @@ function fixed(n,digits=1){return n==null?'—':Number(n).toFixed(digits)}
 function platformName(v){return ({youtube:'YouTube',vk:'VK Клипы',tiktok:'TikTok',instagram:'Instagram Reels',rutube:'Rutube Shorts'})[v.platform]||v.platform||'Видео'}
 function refreshVideos(){
   const seen=new Set();currentVideos=[];
-  for(const video of [...importedVideos,...searchResults]){
-    const key=video.url||`${video.platform}:${video.video_id}`;
+  for(const video of [...searchResults,...importedVideos]){
+    const key=`${video.platform||'youtube'}:${video.video_id||video.url}`;
     if(!seen.has(key)){seen.add(key);currentVideos.push(video)}
   }
   $('csvBtn').disabled=!currentVideos.length;$('jsonBtn').disabled=!currentVideos.length;
@@ -125,23 +135,44 @@ function apiError(detail){
   return detail.map(e=>`${names[e.loc?.at(-1)]||e.loc?.at(-1)||'Поле'}: ${e.msg||'неверное значение'}`).join('; ');
 }
 async function health(){
-  try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube API key подключён'}else{el.querySelector('.dot').style.background='#fca5a5';el.querySelector('span:last-child').textContent='Нужен YOUTUBE_API_KEY'}}
+  try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube подключён · Rutube без ключа'}else{el.querySelector('.dot').style.background='#fde68a';el.querySelector('span:last-child').textContent='Rutube без ключа · YouTube нужен ключ'}}
   catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
 }
 async function searchVideos(){
   storyRequestId++;$('storyPanel').hidden=true;currentStory=null;
   const query=$('query').value.trim();
   if(!query){$('status').className='err small';$('status').textContent='Укажите тему для поиска.';return}
-  $('status').className='muted small';$('status').textContent='Запрашиваем YouTube metadata…';
+  const platforms=[...document.querySelectorAll('input[name="searchPlatform"]:checked')].map(el=>el.value);
+  if(!platforms.length){$('status').className='err small';$('status').textContent='Выберите хотя бы одну площадку.';return}
+  $('status').className='muted small';$('status').textContent='Собираем метаданные с выбранных площадок…';
+  $('platformStatuses').replaceChildren();
   const like=optionalNumber('like');
-  const body={query,max_age_hours:optionalNumber('age'),min_views:optionalNumber('views'),min_views_per_hour:optionalNumber('vph'),min_like_rate:like===null?null:like/100,max_duration_seconds:optionalNumber('duration'),limit:optionalNumber('limit')??10};
+  const body={query,platforms,max_age_hours:optionalNumber('age'),min_views:optionalNumber('views'),min_views_per_hour:optionalNumber('vph'),min_like_rate:like===null?null:like/100,max_duration_seconds:optionalNumber('duration'),limit:optionalNumber('limit')??10};
   try{
     const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
-    searchResults=d.videos;$('checked').textContent=d.found;$('passed').textContent=d.returned;$('withGrowth').textContent=d.videos.filter(v=>v.growth_views_per_hour!=null).length;
-    $('status').textContent=`Готово: ${d.returned} кандидатов. MP4 не скачивались. ${d.videos.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`;
+    searchResults=d.videos||[];$('checked').textContent=d.found??'—';$('passed').textContent=d.returned??searchResults.length;$('withGrowth').textContent=searchResults.filter(v=>v.growth_views_per_hour!=null).length;
+    renderPlatformStatuses(d.platform_statuses||d.platforms||[]);
+    const anySucceeded=(d.platform_statuses||[]).some(item=>item.status==='ok');
+    $('status').className=anySucceeded?'muted small':'warn small';
+    $('status').textContent=anySucceeded
+      ? `Готово: ${searchResults.length} кандидатов. MP4 не скачивались. ${searchResults.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`
+      : 'Ни одна выбранная площадка не выполнила поиск. Причины указаны ниже.';
     refreshVideos();
   }catch(e){$('status').className='err small';$('status').textContent=e.message}
+}
+function renderPlatformStatuses(statuses){
+  const container=$('platformStatuses');container.replaceChildren();
+  for(const item of Array.isArray(statuses)?statuses:[]){
+    const element=document.createElement('span');
+    const state=item.status||'unknown';
+    element.className=state==='ok'?'ok':state==='error'?'err':'warn';
+    const count=item.returned??item.found;
+    const detail=item.detail||item.message||item.error;
+    const description=state==='ok'?(count==null?'поиск выполнен':`${count} результатов`):state==='unavailable'?'недоступно':state==='error'?'ошибка поиска':state;
+    element.textContent=`${platformName(item)}: ${description}${detail?' · '+detail:''}`;
+    container.appendChild(element);
+  }
 }
 async function importVideo(){
   const raw=$('importUrl').value.trim();const status=$('importStatus');
