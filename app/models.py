@@ -1,17 +1,26 @@
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+
+
+SearchPlatform = Literal["youtube", "vk", "tiktok", "instagram", "rutube"]
 
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=200)
+    platforms: list[SearchPlatform] = Field(default_factory=lambda: ["youtube"], min_length=1)
     max_age_hours: int | None = Field(default=None, ge=1, le=24 * 365)
     min_views: int | None = Field(default=None, ge=0)
     min_views_per_hour: float | None = Field(default=None, ge=0)
     min_like_rate: float | None = Field(default=None, ge=0, le=1)
     max_duration_seconds: int | None = Field(default=None, ge=1, le=600)
     limit: int = Field(default=10, ge=1, le=50)
+
+    @field_validator("platforms")
+    @classmethod
+    def unique_platforms(cls, platforms: list[SearchPlatform]) -> list[SearchPlatform]:
+        return list(dict.fromkeys(platforms))
 
 
 class VideoCandidate(BaseModel):
@@ -46,6 +55,15 @@ class SearchResponse(BaseModel):
     found: int
     returned: int
     videos: list[VideoCandidate]
+    platform_statuses: list["PlatformSearchStatus"] = Field(default_factory=list)
+
+
+class PlatformSearchStatus(BaseModel):
+    platform: SearchPlatform
+    status: Literal["ok", "unavailable", "error"]
+    found: int = 0
+    returned: int = 0
+    detail: str | None = None
 
 
 class ImportRequest(BaseModel):

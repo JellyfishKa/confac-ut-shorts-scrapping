@@ -1,4 +1,7 @@
+import asyncio
 from pathlib import Path
+
+import httpx
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -15,12 +18,19 @@ from app.models import (
     DownloadResponse,
     ImportRequest,
     ImportResponse,
+    PlatformSearchStatus,
     SearchRequest,
     SearchResponse,
     StoryRequest,
     StoryResponse,
+    VideoCandidate,
 )
 from app.story import create_story
+from app.instagram_search import InstagramHashtagProvider
+from app.rutube import RutubeProvider
+from app.search_errors import ProviderUnavailableError
+from app.tiktok_search import TikTokResearchProvider
+from app.vk_search import VkProvider
 from app.youtube import YouTubeProvider
 
 app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0")
@@ -46,16 +56,62 @@ def health() -> dict:
 
 @app.post("/api/search", response_model=SearchResponse)
 async def search_videos(request: SearchRequest) -> SearchResponse:
-    try:
-        found, videos = await YouTubeProvider().search(request)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    providers = {
+        "youtube": YouTubeProvider,
+        "vk": VkProvider,
+        "tiktok": TikTokResearchProvider,
+        "instagram": InstagramHashtagProvider,
+        "rutube": RutubeProvider,
+    }
+
+    async def collect(platform: str) -> tuple[int, list[VideoCandidate], PlatformSearchStatus]:
+        provider = providers.get(platform)
+        if provider is None:
+            return 0, [], PlatformSearchStatus(
+                platform=platform,
+                status="unavailable",
+                detail=f"Поиск по {platform} пока не подключён; можно импортировать прямую ссылку на ролик.",
+            )
+        try:
+            found, videos = await provider().search(request)
+            return found, videos, PlatformSearchStatus(platform=platform, status="ok", found=found)
+        except ProviderUnavailableError as exc:
+            return 0, [], PlatformSearchStatus(platform=platform, status="unavailable", detail=str(exc))
+        except Exception as exc:
+            if isinstance(exc, httpx.HTTPStatusError):
+                detail = f"Площадка ответила HTTP {exc.response.status_code}."
+            elif isinstance(exc, RuntimeError):
+                detail = str(exc)
+            else:
+                detail = f"Не удалось получить данные: {type(exc).__name__}."
+            return 0, [], PlatformSearchStatus(platform=platform, status="error", detail=detail)
+
+    results = await asyncio.gather(*(collect(platform) for platform in request.platforms))
+    found = sum(result[0] for result in results)
+    unique = {}
+    for _, candidates, _ in results:
+        for video in candidates:
+            unique[(video.platform, video.video_id)] = video
+    videos = sorted(
+        unique.values(),
+        key=lambda video: (
+            video.growth_views_per_hour is not None,
+            video.growth_views_per_hour or 0,
+            video.views_per_hour or 0,
+            video.popularity_score or 0,
+        ),
+        reverse=True,
+    )[:request.limit]
+    statuses = [result[2] for result in results]
+    for status in statuses:
+        status.returned = sum(video.platform == status.platform for video in videos)
 
     return SearchResponse(
         query=request.query,
         found=found,
         returned=len(videos),
         videos=videos,
+        platform_statuses=statuses,
     )
 
 

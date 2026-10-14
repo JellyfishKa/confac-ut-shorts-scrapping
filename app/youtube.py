@@ -6,6 +6,7 @@ import httpx
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
 from app.scoring import PublicStats, derive_stats, passes_filter
+from app.search_errors import ProviderUnavailableError
 from app.snapshots import SnapshotStore
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
@@ -23,7 +24,7 @@ class YouTubeProvider:
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.youtube_api_key
         if not self.api_key:
-            raise RuntimeError(
+            raise ProviderUnavailableError(
                 "YOUTUBE_API_KEY is not configured. Copy .env.example to .env "
                 "and paste an API key with YouTube Data API v3 enabled."
             )
