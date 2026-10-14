@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     youtube_api_key: str = ""
     gemini_api_key: str = ""
+    vk_access_token: str = ""
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = ""
+    tiktok_research_token: str = ""
+    instagram_access_token: str = ""
+    instagram_user_id: str = ""
     download_dir: Path = Path("downloads")
     data_dir: Path = Path("data")
     max_results: int = 50
