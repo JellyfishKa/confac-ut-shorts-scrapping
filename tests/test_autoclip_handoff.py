@@ -79,3 +79,30 @@ def test_autoclip_failure_is_not_reported_as_success(monkeypatch):
         autoclip_handoff.run_handoff(
             video=str(video), downloads_dir=str(video.parent), platform="youtube_shorts",
         )
+
+
+def test_autoclip_project_gemini_key_stays_out_of_command(monkeypatch):
+    root = Path(__file__).resolve().parents[1]
+    video = root / "downloads" / "selected.mp4"
+    executable = root / "autoclip.exe"
+    _fake_files(monkeypatch, video, executable)
+    monkeypatch.setattr(autoclip_handoff.shutil, "which", lambda name: str(executable))
+    monkeypatch.setattr(autoclip_handoff, "dotenv_values", lambda path: {"GEMINI_API_KEY": "test-secret"})
+    monkeypatch.setattr(autoclip_handoff, "GEMINI_DATA_DIR", root / "data" / "test-autoclip-gemini")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        output = "1.5.7" if args[1] == "--version" else '{"ok":true}'
+        return subprocess.CompletedProcess(args, 0, output, "")
+
+    monkeypatch.setattr(autoclip_handoff.subprocess, "run", run)
+    autoclip_handoff.run_handoff(
+        video=str(video), downloads_dir=str(video.parent), platform="youtube_shorts",
+        use_project_gemini=True,
+    )
+    assert all("test-secret" not in " ".join(args) for args, _ in calls)
+    assert calls[1][1]["env"]["GEMINI_API_KEY"] == "test-secret"
+    assert calls[1][1]["env"]["LLM_PROVIDER"] == "gemini"
+    assert calls[1][1]["env"]["LLM_MODEL"] == "gemini-3.5-flash-lite"
+    assert calls[1][1]["env"]["AUTOCLIP_DATA_DIR"] == str(autoclip_handoff.GEMINI_DATA_DIR)
