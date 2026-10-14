@@ -95,7 +95,12 @@ class RutubeProvider:
                         continue
                     age_hours = max((now - published_at).total_seconds() / 3600, 1.0)
                     views_per_hour = views / age_hours if views is not None else None
-                    if age_hours > max_age or views is None or views < min_views:
+                    if views is None:
+                        continue
+                    if snapshots is None:
+                        snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
+                    growth = snapshots.observe_views(f"rutube:{video_id}", views=views)
+                    if age_hours > max_age or views < min_views:
                         continue
                     if views_per_hour is None or views_per_hour < min_views_per_hour:
                         continue
@@ -107,9 +112,6 @@ class RutubeProvider:
                     author = item.get("author") or {}
                     if not isinstance(author, dict):
                         author = {}
-                    if snapshots is None:
-                        snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
-                    growth = snapshots.observe_views(f"rutube:{video_id}", views=views)
                     candidates.append(VideoCandidate(
                         platform="rutube",
                         video_id=video_id,

@@ -124,8 +124,9 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
     }
     long = {**short, "id": "b" * 32, "duration": 600}
     no_views = {**short, "id": "c" * 32, "hits": None}
+    below_threshold = {**short, "id": "d" * 32, "hits": 100}
     responses = [
-        {"results": [short, long, no_views], "has_next": True, "next": "/api/search/video/?query=cat&page=2"},
+        {"results": [short, long, no_views, below_threshold], "has_next": True, "next": "/api/search/video/?query=cat&page=2"},
         {"results": [short], "has_next": False, "next": None},
     ]
 
@@ -155,10 +156,10 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
             return Response(body)
 
     monkeypatch.setattr("app.rutube.httpx.AsyncClient", Client)
-    request = SearchRequest(query="cat", platforms=["rutube"], max_age_hours=24, min_views=0,
+    request = SearchRequest(query="cat", platforms=["rutube"], max_age_hours=24, min_views=1000,
                             max_duration_seconds=60, limit=10)
     found, videos = asyncio.run(RutubeProvider().search(request))
-    assert found == 4
+    assert found == 5
     assert len(videos) == 1
     video = videos[0]
     assert video.platform == "rutube" and video.url.startswith("https://rutube.ru/shorts/")
@@ -168,12 +169,16 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
     assert video.previous_views is None and video.growth_views_per_hour is None
     with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
         assert conn.execute("SELECT COUNT(*) FROM video_snapshots").fetchone()[0] == 0
-        assert conn.execute("SELECT video_id, views FROM view_snapshots").fetchall() == [(f"rutube:{'a' * 32}", 3000)]
+        assert conn.execute("SELECT video_id, views FROM view_snapshots ORDER BY id").fetchall() == [
+            (f"rutube:{'a' * 32}", 3000), (f"rutube:{'d' * 32}", 100),
+        ]
 
+    request.min_views = 0
     _, repeated = asyncio.run(RutubeProvider().search(request))
     assert repeated[0].previous_views == 3000
     assert repeated[0].growth_views_per_hour == 0
     assert repeated[0].growth_likes_per_hour is None
+    assert repeated[1].previous_views == 100
 
     request.min_like_rate = 0.01
     _, videos = asyncio.run(RutubeProvider().search(request))
