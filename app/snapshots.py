@@ -41,6 +41,60 @@ class SnapshotStore:
                 "CREATE INDEX IF NOT EXISTS idx_video_snapshots_video_time "
                 "ON video_snapshots(video_id, captured_at)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS view_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id TEXT NOT NULL,
+                    captured_at TEXT NOT NULL,
+                    views INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_view_snapshots_video_time "
+                "ON view_snapshots(video_id, captured_at)"
+            )
+
+    def observe_views(
+        self,
+        video_id: str,
+        *,
+        views: int,
+        captured_at: datetime | None = None,
+    ) -> GrowthStats:
+        """Track view growth when a platform does not publish likes/comments."""
+        now = captured_at or datetime.now(timezone.utc)
+        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+
+        with self._connect() as conn:
+            previous = conn.execute(
+                """
+                SELECT captured_at, views
+                FROM view_snapshots
+                WHERE video_id = ?
+                ORDER BY captured_at DESC
+                LIMIT 1
+                """,
+                (video_id,),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO view_snapshots(video_id, captured_at, views) VALUES (?, ?, ?)",
+                (video_id, now.isoformat(), views),
+            )
+
+        if not previous:
+            return GrowthStats()
+        previous_at = datetime.fromisoformat(previous[0])
+        previous_at = previous_at if previous_at.tzinfo else previous_at.replace(tzinfo=timezone.utc)
+        elapsed_hours = (now - previous_at).total_seconds() / 3600
+        if elapsed_hours <= 0:
+            return GrowthStats(previous_views=int(previous[1]))
+        return GrowthStats(
+            previous_views=int(previous[1]),
+            growth_views_per_hour=round((views - int(previous[1])) / elapsed_hours, 2),
+            snapshot_age_minutes=round(elapsed_hours * 60, 1),
+        )
 
     def observe(
         self,

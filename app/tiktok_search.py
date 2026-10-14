@@ -14,6 +14,7 @@ from app.config import settings
 from app.models import SearchRequest, VideoCandidate
 from app.scoring import PublicStats, derive_stats, passes_filter
 from app.search_errors import ProviderUnavailableError
+from app.snapshots import SnapshotStore
 
 
 _API = "https://open.tiktokapis.com/v2"
@@ -101,6 +102,7 @@ class TikTokResearchProvider:
                 except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
                     raise RuntimeError("TikTok Research API отклонил поиск. Проверьте доступ research.data.basic или повторите позже.") from exc
         candidates: list[VideoCandidate] = []
+        snapshots: SnapshotStore | None = None
         for raw in raw_videos:
             try:
                 video_id = str(raw["id"])
@@ -127,6 +129,12 @@ class TikTokResearchProvider:
             if not username:
                 continue
             description = str(raw.get("video_description") or "")
+            if snapshots is None:
+                snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
+            growth = snapshots.observe(
+                f"tiktok:{video_id}", views=public.views,
+                likes=public.likes, comments=public.comments,
+            )
             candidates.append(VideoCandidate(
                 platform="tiktok", video_id=video_id,
                 url=f"https://www.tiktok.com/@{username}/video/{video_id}",
@@ -136,7 +144,15 @@ class TikTokResearchProvider:
                 views=public.views, likes=public.likes, comments=public.comments,
                 age_hours=derived.age_hours, views_per_hour=derived.views_per_hour,
                 like_rate=derived.like_rate, comment_rate=derived.comment_rate,
+                previous_views=growth.previous_views,
+                growth_views_per_hour=growth.growth_views_per_hour,
+                growth_likes_per_hour=growth.growth_likes_per_hour,
+                snapshot_age_minutes=growth.snapshot_age_minutes,
                 popularity_score=derived.popularity_score,
             ))
-        candidates.sort(key=lambda video: video.popularity_score or 0, reverse=True)
+        candidates.sort(key=lambda video: (
+            video.growth_views_per_hour is not None,
+            video.growth_views_per_hour or 0,
+            video.popularity_score or 0,
+        ), reverse=True)
         return len(raw_videos), candidates[:request.limit]

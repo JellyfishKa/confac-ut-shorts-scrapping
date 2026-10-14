@@ -133,10 +133,10 @@ class VkProvider:
                     if min_like_rate > 0 and (likes is None or likes / max(views, 1) < min_like_rate):
                         continue
                     comments = _nonnegative_int(item.get("comments"))
-                    growth = (
-                        snapshots.observe(f"vk:{video_id}", views=views, likes=likes, comments=comments)
-                        if likes is not None and comments is not None else None
-                    )
+                    if likes is not None and comments is not None:
+                        growth = snapshots.observe(f"vk:{video_id}", views=views, likes=likes, comments=comments)
+                    else:
+                        growth = snapshots.observe_views(f"vk:{video_id}", views=views)
                     candidates.append(VideoCandidate(
                         platform="vk",
                         video_id=video_id,
@@ -155,10 +155,10 @@ class VkProvider:
                         views_per_hour=round(views_per_hour, 2),
                         like_rate=round(likes / max(views, 1), 6) if likes is not None else None,
                         comment_rate=round(comments / max(views, 1), 6) if comments is not None else None,
-                        previous_views=growth.previous_views if growth else None,
-                        growth_views_per_hour=growth.growth_views_per_hour if growth else None,
-                        growth_likes_per_hour=growth.growth_likes_per_hour if growth else None,
-                        snapshot_age_minutes=growth.snapshot_age_minutes if growth else None,
+                        previous_views=growth.previous_views,
+                        growth_views_per_hour=growth.growth_views_per_hour,
+                        growth_likes_per_hour=growth.growth_likes_per_hour,
+                        snapshot_age_minutes=growth.snapshot_age_minutes,
                         popularity_score=None,
                     ))
 

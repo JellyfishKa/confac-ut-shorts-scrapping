@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -112,7 +113,8 @@ def test_vk_and_tiktok_missing_credentials_are_individually_reported(monkeypatch
     ]
 
 
-def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monkeypatch):
+def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     published = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     short = {
         "id": "a" * 32, "title": "Short clip", "duration": 30,
@@ -164,6 +166,14 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
     assert video.likes is None and video.comments is None
     assert video.like_rate is None and video.comment_rate is None
     assert video.previous_views is None and video.growth_views_per_hour is None
+    with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM video_snapshots").fetchone()[0] == 0
+        assert conn.execute("SELECT video_id, views FROM view_snapshots").fetchall() == [(f"rutube:{'a' * 32}", 3000)]
+
+    _, repeated = asyncio.run(RutubeProvider().search(request))
+    assert repeated[0].previous_views == 3000
+    assert repeated[0].growth_views_per_hour == 0
+    assert repeated[0].growth_likes_per_hour is None
 
     request.min_like_rate = 0.01
     _, videos = asyncio.run(RutubeProvider().search(request))

@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -8,6 +9,11 @@ from app.config import settings
 from app.models import SearchRequest
 from app.search_errors import ProviderUnavailableError
 from app.vk_search import VK_SEARCH_API, VkProvider
+
+
+@pytest.fixture(autouse=True)
+def isolated_snapshots(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
 
 
 class FakeResponse:
@@ -46,8 +52,8 @@ class FakeSnapshots:
                                growth_likes_per_hour=None, snapshot_age_minutes=None)
 
 
-def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch):
-    monkeypatch.setattr("app.vk_search.SnapshotStore", FakeSnapshots)
+def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     now = datetime.now(timezone.utc)
     recent = int((now - timedelta(hours=4)).timestamp())
     old = int((now - timedelta(days=20)).timestamp())
@@ -88,6 +94,11 @@ def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch):
     assert calls[0][1]["filters"] == "short"
     assert calls[0][1]["access_token"] == "secret-token"
     assert "secret-token" not in calls[0][0]
+    payload["response"]["items"][0].update(views=12200, likes={"count": 640}, comments=31)
+    _, repeated = asyncio.run(VkProvider(access_token="secret-token").search(request))
+    assert repeated[0].previous_views == 12000
+    assert repeated[0].growth_views_per_hour is not None and repeated[0].growth_views_per_hour > 0
+    assert repeated[0].growth_likes_per_hour is not None and repeated[0].growth_likes_per_hour > 0
 
 
 def test_missing_likes_cannot_satisfy_positive_like_filter(monkeypatch):
@@ -105,15 +116,8 @@ def test_missing_likes_cannot_satisfy_positive_like_filter(monkeypatch):
     assert videos == []
 
 
-def test_missing_comments_do_not_create_false_snapshot(monkeypatch):
-    class RejectSnapshots:
-        def __init__(self, _):
-            pass
-
-        def observe(self, *_args, **_kwargs):
-            raise AssertionError("Missing comments must not be stored as zero")
-
-    monkeypatch.setattr("app.vk_search.SnapshotStore", RejectSnapshots)
+def test_missing_comments_use_view_only_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     timestamp = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
     payload = {"response": {"count": 1, "items": [
         {"id": 1, "owner_id": 7, "type": "short_video", "duration": 30,
@@ -127,6 +131,14 @@ def test_missing_comments_do_not_create_false_snapshot(monkeypatch):
     assert videos[0].likes == 100 and videos[0].comments is None
     assert videos[0].previous_views is None
     assert videos[0].growth_views_per_hour is None
+    with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM video_snapshots").fetchone()[0] == 0
+        assert conn.execute("SELECT views FROM view_snapshots").fetchall() == [(10000,)]
+    payload["response"]["items"][0]["views"] = 10100
+    _, repeated = asyncio.run(VkProvider(access_token="test").search(SearchRequest(query="котики")))
+    assert repeated[0].previous_views == 10000
+    assert repeated[0].growth_views_per_hour is not None and repeated[0].growth_views_per_hour > 0
+    assert repeated[0].growth_likes_per_hour is None
 
 
 def test_vk_error_never_exposes_access_token(monkeypatch):

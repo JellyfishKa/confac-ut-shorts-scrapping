@@ -5,9 +5,15 @@ import httpx
 import pytest
 
 from app.models import SearchRequest
+from app.config import settings
 from app.search_errors import ProviderUnavailableError
 from app.instagram_search import InstagramHashtagProvider
 from app.tiktok_search import TikTokResearchProvider, _TOKEN_CACHE
+
+
+@pytest.fixture(autouse=True)
+def isolated_snapshots(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
 
 
 def _mock_client(monkeypatch, module_name, handler):
@@ -21,7 +27,8 @@ def test_tiktok_requires_approved_credentials():
         TikTokResearchProvider(client_key="", client_secret="", token="")
 
 
-def test_tiktok_client_token_and_keyword_search(monkeypatch):
+def test_tiktok_client_token_and_keyword_search(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
     _TOKEN_CACHE.clear()
     calls = []
     now = int(datetime.now(timezone.utc).timestamp()) - 3600
@@ -47,8 +54,33 @@ def test_tiktok_client_token_and_keyword_search(monkeypatch):
     assert found == 1 and videos[0].platform == "tiktok"
     assert videos[0].url == "https://www.tiktok.com/@chef/video/123"
     assert videos[0].views_per_hour is not None
+    assert videos[0].previous_views is None
     asyncio.run(provider.search(request))
     assert len([call for call in calls if call.url.path.endswith("/oauth/token/")]) == 1
+
+
+def test_tiktok_repeated_search_tracks_views_and_likes(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    now = int(datetime.now(timezone.utc).timestamp()) - 3600
+    counts = [(10000, 1000), (10200, 1040)]
+
+    def handler(request):
+        views, likes = counts.pop(0)
+        return httpx.Response(200, json={"error": {"code": "ok"}, "data": {"videos": [{
+            "id": 456, "username": "chef", "video_description": "Soup",
+            "create_time": now, "video_duration": 20,
+            "view_count": views, "like_count": likes, "comment_count": 100,
+        }]}})
+
+    _mock_client(monkeypatch, "app.tiktok_search", handler)
+    provider = TikTokResearchProvider(client_key="", client_secret="", token="secret")
+    request = SearchRequest(query="soup", platforms=["tiktok"], min_views=0)
+    _, first = asyncio.run(provider.search(request))
+    _, second = asyncio.run(provider.search(request))
+    assert first[0].growth_views_per_hour is None
+    assert second[0].previous_views == 10000
+    assert second[0].growth_views_per_hour is not None and second[0].growth_views_per_hour > 0
+    assert second[0].growth_likes_per_hour is not None and second[0].growth_likes_per_hour > 0
 
 
 def test_tiktok_api_error_is_not_empty_success(monkeypatch):

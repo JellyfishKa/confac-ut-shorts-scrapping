@@ -7,6 +7,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
+from app.snapshots import SnapshotStore
 
 
 RUTUBE_SEARCH = "https://rutube.ru/api/search/video/"
@@ -63,6 +64,7 @@ class RutubeProvider:
         now = datetime.now(timezone.utc)
         found = 0
         candidates: list[VideoCandidate] = []
+        snapshots: SnapshotStore | None = None
         seen_ids: set[str] = set()
         next_url: str | None = RUTUBE_SEARCH
         async with httpx.AsyncClient(timeout=20) as client:
@@ -105,6 +107,9 @@ class RutubeProvider:
                     author = item.get("author") or {}
                     if not isinstance(author, dict):
                         author = {}
+                    if snapshots is None:
+                        snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
+                    growth = snapshots.observe_views(f"rutube:{video_id}", views=views)
                     candidates.append(VideoCandidate(
                         platform="rutube",
                         video_id=video_id,
@@ -123,10 +128,10 @@ class RutubeProvider:
                         views_per_hour=round(views_per_hour, 2),
                         like_rate=None,
                         comment_rate=None,
-                        previous_views=None,
-                        growth_views_per_hour=None,
+                        previous_views=growth.previous_views,
+                        growth_views_per_hour=growth.growth_views_per_hour,
                         growth_likes_per_hour=None,
-                        snapshot_age_minutes=None,
+                        snapshot_age_minutes=growth.snapshot_age_minutes,
                         popularity_score=None,
                     ))
 
