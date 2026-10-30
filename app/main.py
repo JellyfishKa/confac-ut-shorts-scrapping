@@ -7,6 +7,7 @@ import httpx
 
 from fastapi import FastAPI, HTTPException
 from fastapi import Path as UrlPath
+from fastapi import Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -28,10 +29,12 @@ from app.models import (
     SearchResponse,
     StoryRequest,
     StoryResponse,
+    HypeResponse,
     TrackedResponse,
     VideoCandidate,
 )
 from app.story import create_story
+from app.hype import pick_hype
 from app.instagram_search import InstagramHashtagProvider
 from app.pipeline import rank
 from app.rutube import RutubeProvider
@@ -144,6 +147,11 @@ async def import_video_url(request: ImportRequest) -> ImportResponse:
     imported = await import_video(request)
     TrackedStore().track([imported.video])
     return imported
+
+
+@app.get("/api/hype", response_model=HypeResponse)
+def hype(limit: Annotated[int, Query(ge=1, le=20)] = 5) -> HypeResponse:
+    return pick_hype(TrackedStore().active(), limit)
 
 
 @app.get("/api/tracked", response_model=TrackedResponse)

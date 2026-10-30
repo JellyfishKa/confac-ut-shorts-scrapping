@@ -125,6 +125,18 @@ class TrackedResponse(BaseModel):
     videos: list[TrackedVideo]
 
 
+class HypePick(BaseModel):
+    video: VideoCandidate
+    hype_score: float
+    acceleration: float | None
+    reasons: list[str]
+
+
+class HypeResponse(BaseModel):
+    considered: int
+    picks: list[HypePick]
+
+
 class PinRequest(BaseModel):
     platform: SearchPlatform
     video_id: str = Field(min_length=1, max_length=200)

@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     tracker_interval_minutes: float = 30.0
     tracker_hours: float = 48.0
 
+    # The "Хайп" pick ignores videos below this many views as junk.
+    hype_min_views: int = 1_000
+
     weight_views_per_hour: float = 0.55
     weight_like_rate: float = 0.30
     weight_comment_rate: float = 0.15

@@ -23,6 +23,9 @@
     code{background:#09111f;padding:2px 5px;border-radius:5px}
     #storyText{white-space:pre-wrap;line-height:1.55;max-height:50vh;overflow:auto}
     #trackedPanel table{min-width:760px}.spark{display:block;color:var(--accent)}
+    .hype{background:linear-gradient(90deg,#fb923c,#f43f5e);color:#fff}
+    .picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}.pick{background:#0b1426;border:1px solid #21314e;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
+    .pick img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:8px;background:#0a1220}.chips{display:flex;flex-wrap:wrap;gap:6px}.chips span{font-size:11px;padding:4px 8px;border-radius:999px;background:#18243e;color:#dce7ff}
   </style>
 </head>
 <body>
@@ -55,6 +58,7 @@
     </div>
     <div class="actions">
       <button onclick="searchVideos()">Найти по метаданным</button>
+      <button class="hype" onclick="showHype()" title="Самые быстрорастущие ролики среди всех отслеживаемых">Хайп</button>
       <button class="secondary" onclick="exportCSV()" id="csvBtn" disabled>CSV</button>
       <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
     </div>
@@ -76,6 +80,12 @@
     <div class="stat"><b id="passed">—</b><span>прошло фильтры</span></div>
     <div class="stat"><b id="withGrowth">—</b><span>есть повторный snapshot</span></div>
     <div class="stat"><b id="downloadHint">0</b><span>MP4 скачано этой сессией</span></div>
+  </div>
+
+  <div class="card" id="hypePanel" hidden>
+    <h2>Хайп сейчас</h2>
+    <p id="hypeStatus" class="small muted" role="status"></p>
+    <div id="hypePicks" class="picks"></div>
   </div>
 
   <div class="card tablewrap">
@@ -300,6 +310,30 @@ function renderTracked(d){
     tr.querySelector('.untrack').onclick=()=>{if(confirm('Перестать отслеживать ролик? Уже собранные снимки сохранятся.'))trackedAction(fetch(`/api/tracked/${encodeURIComponent(v.platform)}/${encodeURIComponent(v.video_id)}`,{method:'DELETE'}))};
     body.appendChild(tr);
   }
+}
+async function showHype(){
+  const panel=$('hypePanel'),status=$('hypeStatus'),picks=$('hypePicks');
+  panel.hidden=false;picks.replaceChildren();status.className='small muted';status.textContent='Выбираем самые быстрорастущие ролики…';
+  try{
+    const r=await fetch('/api/hype?limit=5');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    if(!d.picks.length){status.textContent='Пока не из чего выбирать: выполните поиск — найденные ролики попадут в отслеживаемые, а трекер измерит их рост.';return}
+    status.textContent=`Лучшие ${d.picks.length} из ${d.considered} отслеживаемых роликов, мусор отсеян. Оценка — место ролика среди найденных по текущей скорости, ускорению, лайкам, охвату сверх подписчиков и свежести.`;
+    d.picks.forEach((p,i)=>{
+      const v=p.video;const card=document.createElement('div');card.className='pick';
+      card.innerHTML=`${v.thumbnail_url?`<img src="${esc(v.thumbnail_url)}" alt="">`:''}
+        <div class="small muted">#${i+1} · ${esc(platformName(v))} · хайп ${fixed(p.hype_score*100,0)}/100</div>
+        <a class="title" target="_blank" rel="noopener noreferrer" href="${esc(v.url)}">${esc(v.title)}</a>
+        <div class="chips">${p.reasons.map(reason=>`<span>${esc(reason)}</span>`).join('')}</div>
+        <div class="actions"><button class="secondary story">Сюжет</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div>
+        <div class="small muted msg"></div>`;
+      const msg=card.querySelector('.msg');
+      card.querySelector('.story').onclick=()=>generateStory(v,msg);
+      card.querySelector('.comfy').onclick=()=>downloadManifest(v,msg);
+      card.querySelector('.dl').onclick=()=>downloadVideo(v,msg);
+      picks.appendChild(card);
+    });
+    panel.scrollIntoView({behavior:'smooth',block:'start'});
+  }catch(e){status.className='small err';status.textContent=e.message}
 }
 async function trackedAction(request){
   try{const r=await request;if(!r.ok){const d=await r.json();throw new Error(apiError(d.detail))}await loadTracked()}
