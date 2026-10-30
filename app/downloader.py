@@ -3,6 +3,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
+from fastapi import HTTPException
 from yt_dlp import YoutubeDL
 
 from app.config import settings
@@ -31,6 +32,20 @@ def was_downloaded_for(url: str, path: Path) -> bool:
     with closing(_registry()) as conn:
         row = conn.execute("SELECT path FROM downloads WHERE url = ?", (url,)).fetchone()
     return row is not None and Path(row[0]) == path
+
+
+def downloaded_mp4(path_text: str, source_url: str) -> Path:
+    """The local MP4 the app downloaded for this URL, or 422 for any other file."""
+    try:
+        root = settings.download_dir.resolve()
+        path = Path(path_text).resolve(strict=True)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Сначала скачайте MP4 через приложение.") from exc
+    if not path.is_relative_to(root) or not path.is_file() or path.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=422, detail="Нужен MP4 из папки загрузок приложения.")
+    if not was_downloaded_for(source_url, path):
+        raise HTTPException(status_code=422, detail="Сначала скачайте именно этот ролик через приложение.")
+    return path
 
 
 class VideoDownloader:

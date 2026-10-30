@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 SearchPlatform = Literal["youtube", "vk", "tiktok", "instagram", "rutube"]
@@ -141,3 +141,46 @@ class PinRequest(BaseModel):
     platform: SearchPlatform
     video_id: str = Field(min_length=1, max_length=200)
     pinned: bool
+
+
+class TranscriptSegment(BaseModel):
+    start_seconds: float = Field(ge=0, le=24 * 3600)
+    end_seconds: float = Field(gt=0, le=24 * 3600)
+    speaker: str | None = Field(default=None, max_length=100)
+    text: str = Field(max_length=2000)
+
+    @field_validator("text")
+    @classmethod
+    def non_empty_text(cls, text: str) -> str:
+        text = text.strip()
+        if not text:
+            raise ValueError("Реплика не может быть пустой.")
+        return text
+
+    @model_validator(mode="after")
+    def ends_after_start(self) -> "TranscriptSegment":
+        if self.end_seconds <= self.start_seconds:
+            raise ValueError("Конец реплики должен быть позже начала.")
+        return self
+
+
+class TranscriptRequest(BaseModel):
+    url: HttpUrl
+    local_video_path: str = Field(min_length=1)
+
+
+class Transcript(BaseModel):
+    """Speech with timestamps; a draft to review before quoting or publishing."""
+    source_url: str
+    language: str | None
+    model: str
+    segments: list[TranscriptSegment]
+
+
+class SrtRequest(TranscriptRequest):
+    segments: list[TranscriptSegment] = Field(min_length=1, max_length=5000)
+
+
+class SrtResponse(BaseModel):
+    path: str
+    srt: str

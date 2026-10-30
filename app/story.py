@@ -1,13 +1,12 @@
 import asyncio
 import base64
 import subprocess
-from pathlib import Path
 
 import httpx
 from fastapi import HTTPException
 
 from app.config import settings
-from app.downloader import was_downloaded_for
+from app.downloader import downloaded_mp4
 from app.import_video import YOUTUBE_HOSTS, _validated_video_url
 from app.models import ImportRequest, StoryRequest, StoryResponse
 
@@ -30,15 +29,7 @@ MAX_STORY_DURATION_SECONDS = 180
 
 
 def _local_video_input(path_text: str, source_url: str) -> dict[str, str]:
-    try:
-        root = settings.download_dir.resolve()
-        path = Path(path_text).resolve(strict=True)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail="Сначала скачайте MP4 через приложение.") from exc
-    if not path.is_relative_to(root) or not path.is_file() or path.suffix.lower() != ".mp4":
-        raise HTTPException(status_code=422, detail="Для анализа нужен MP4 из папки загрузок приложения.")
-    if not was_downloaded_for(source_url, path):
-        raise HTTPException(status_code=422, detail="Сначала скачайте именно этот ролик через приложение.")
+    path = downloaded_mp4(path_text, source_url)
     try:
         size = path.stat().st_size
         if not 0 < size <= MAX_INLINE_VIDEO_BYTES:

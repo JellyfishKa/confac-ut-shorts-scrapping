@@ -22,6 +22,7 @@
     .explain{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media(max-width:900px){.grid,.stats,.explain{grid-template-columns:1fr 1fr}.wrap{padding:16px}}@media(max-width:600px){.grid,.stats,.explain{grid-template-columns:1fr}}
     code{background:#09111f;padding:2px 5px;border-radius:5px}
     #storyText{white-space:pre-wrap;line-height:1.55;max-height:50vh;overflow:auto}
+    #transcriptPanel table{min-width:640px}#transcriptPanel td input{width:96px}#transcriptPanel textarea{width:100%;min-width:320px;background:#0b1324;color:#fff;border:1px solid #344361;border-radius:9px;padding:8px;font:inherit;resize:vertical}
     #trackedPanel table{min-width:760px}.spark{display:block;color:var(--accent)}
     .hype{background:linear-gradient(90deg,#fb923c,#f43f5e);color:#fff}
     .picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}.pick{background:#0b1426;border:1px solid #21314e;border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:6px}
@@ -118,6 +119,24 @@
       <button class="secondary" id="storyCopy" onclick="copyStory()" disabled>Копировать JSON</button>
       <button class="secondary" id="storySave" onclick="saveStory()" disabled>Скачать JSON</button>
     </div>
+  </div>
+
+  <div class="card" id="transcriptPanel" hidden>
+    <h2>Реплики с таймкодами</h2>
+    <p class="small muted">Whisper распознаёт речь на этом компьютере, звук никуда не отправляется. Результат — черновик: сверьте текст и таймкоды с роликом, исправьте ошибки и сохраните SRT для AutoClip.</p>
+    <p id="transcriptSource" class="small muted"></p>
+    <p id="transcriptStatus" class="small muted" role="status"></p>
+    <div class="tablewrap">
+      <table id="transcriptTable" hidden>
+        <thead><tr><th>Начало, с</th><th>Конец, с</th><th>Реплика</th><th></th></tr></thead>
+        <tbody id="transcriptRows"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button class="secondary" id="transcriptAdd" onclick="addTranscriptRow()" disabled>Добавить реплику</button>
+      <button id="transcriptSave" onclick="saveTranscript()" disabled>Сохранить SRT</button>
+    </div>
+    <p id="transcriptHint" class="small muted"></p>
   </div>
 
   <div class="card explain">
@@ -223,8 +242,9 @@ function render(videos){
       <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
       <td>${pct(v.like_rate)}</td><td>${fmt(v.comments)}</td><td>${v.breakout_ratio==null?'—':fixed(v.breakout_ratio,2)+'×'}</td>
       <td>${v.popularity_score==null?'—':`<span class="score">${fixed(v.popularity_score,3)}</span><div class="bar"><i style="width:${Math.min(100,v.popularity_score*100)}%"></i></div>`}</td>
-      <td><div class="actions"><button class="secondary story">Сюжет</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg">${v.platform&&v.platform!=='youtube'?'Для сюжета MP4 будет отправлен в Gemini.':''}</div></td>`;
+      <td><div class="actions"><button class="secondary story">Сюжет</button><button class="secondary transcript">Реплики</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div><div class="small muted msg">${v.platform&&v.platform!=='youtube'?'Для сюжета MP4 будет отправлен в Gemini.':''}</div></td>`;
     tr.querySelector('.story').onclick=()=>generateStory(v,tr.querySelector('.msg'));
+    tr.querySelector('.transcript').onclick=()=>generateTranscript(v,tr.querySelector('.msg'));
     tr.querySelector('.comfy').onclick=()=>downloadManifest(v,tr.querySelector('.msg'));
     tr.querySelector('.dl').onclick=()=>downloadVideo(v,tr.querySelector('.msg'));
     $('results').appendChild(tr);
@@ -257,13 +277,71 @@ async function copyStory(){
   try{await navigator.clipboard.writeText(JSON.stringify(currentStory,null,2));$('storyStatus').textContent='JSON скопирован'}
   catch(e){$('storyStatus').className='small err';$('storyStatus').textContent='Не удалось скопировать. Используйте скачивание JSON.'}
 }
+let transcriptVideo=null; let transcriptRequestId=0;
+async function generateTranscript(v,msg){
+  const requestId=++transcriptRequestId;
+  const panel=$('transcriptPanel');panel.hidden=false;panel.scrollIntoView({behavior:'smooth',block:'start'});
+  $('transcriptSource').textContent=v.title+' · '+v.url;
+  $('transcriptRows').replaceChildren();$('transcriptTable').hidden=true;$('transcriptHint').textContent='';
+  $('transcriptAdd').disabled=true;$('transcriptSave').disabled=true;transcriptVideo=null;
+  const status=$('transcriptStatus');status.className='small muted';status.textContent='Готовим MP4…';
+  try{
+    if(!v.local_video_path){
+      const path=await downloadVideo(v,msg,{question:'Скачать MP4 для расшифровки речи? Звук распознаётся на этом компьютере и никуда не отправляется.'});
+      if(requestId!==transcriptRequestId)return;
+      if(!path){status.className='small warn';status.textContent='MP4 не скачан, расшифровка не запущена.';return}
+    }
+    status.textContent='Распознаём речь на этом компьютере… Первый запуск скачивает модель Whisper и может занять несколько минут.';
+    const r=await fetch('/api/transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v.url,local_video_path:v.local_video_path})});
+    const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    if(requestId!==transcriptRequestId)return;
+    transcriptVideo=v;
+    for(const segment of d.segments)addTranscriptRow(segment);
+    $('transcriptTable').hidden=false;$('transcriptAdd').disabled=false;
+    status.textContent=d.segments.length
+      ? `Готово · ${d.model} · язык: ${d.language||'не определён'} · реплик: ${d.segments.length}. Сверьте текст и таймкоды с роликом перед сохранением.`
+      : 'Речь не распознана. Реплики можно добавить вручную.';
+  }catch(e){if(requestId!==transcriptRequestId)return;status.className='small err';status.textContent=e.message}
+}
+function addTranscriptRow(segment){
+  const rows=$('transcriptRows');
+  if(!segment){const last=rows.lastElementChild;const start=last?Number(last.querySelector('.tEnd').value)||0:0;segment={start_seconds:start,end_seconds:start+2,text:''}}
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td><input class="tStart" type="number" min="0" step="0.01" value="${Number(segment.start_seconds)}" aria-label="Начало, секунды"/></td>
+    <td><input class="tEnd" type="number" min="0" step="0.01" value="${Number(segment.end_seconds)}" aria-label="Конец, секунды"/></td>
+    <td><textarea class="tText" rows="2" aria-label="Текст реплики">${esc(segment.text)}</textarea></td>
+    <td><button class="danger tDel" title="Удалить реплику" aria-label="Удалить реплику">✕</button></td>`;
+  tr.querySelector('.tDel').onclick=()=>{tr.remove();$('transcriptSave').disabled=!rows.children.length};
+  rows.appendChild(tr);$('transcriptSave').disabled=false;
+}
+function transcriptSegments(){
+  return [...$('transcriptRows').children].map((tr,i)=>{
+    const start=Number(tr.querySelector('.tStart').value),end=Number(tr.querySelector('.tEnd').value),text=tr.querySelector('.tText').value.trim();
+    if(!Number.isFinite(start)||start<0)throw new Error(`Реплика ${i+1}: начало должно быть не меньше 0.`);
+    if(!Number.isFinite(end)||end<=start)throw new Error(`Реплика ${i+1}: конец должен быть позже начала.`);
+    if(!text)throw new Error(`Реплика ${i+1}: текст пустой — заполните или удалите строку.`);
+    return {start_seconds:start,end_seconds:end,speaker:null,text};
+  });
+}
+async function saveTranscript(){
+  if(!transcriptVideo)return;
+  const status=$('transcriptStatus');
+  try{
+    const segments=transcriptSegments();
+    const r=await fetch('/api/transcript/srt',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:transcriptVideo.url,local_video_path:transcriptVideo.local_video_path,segments})});
+    const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    saveBlob(d.path.split(/[\\/]/).pop(),d.srt,'application/x-subrip');
+    status.className='small ok';status.textContent='SRT сохранён рядом с MP4: '+d.path;
+    $('transcriptHint').textContent=`Передать в AutoClip: .\\.venv\\Scripts\\python.exe -X utf8 scripts\\autoclip_handoff.py "${transcriptVideo.local_video_path}" --srt "${d.path}" --autoclip "путь\\к\\autoclip.exe"`;
+  }catch(e){status.className='small err';status.textContent=e.message}
+}
 function saveStory(){if(currentStory)saveBlob(`${new URL(currentStory.url).pathname.split('/').filter(Boolean).pop()}.story.json`,JSON.stringify(currentStory,null,2),'application/json')}
 async function downloadManifest(v,msg){
   msg.textContent='Формируем manifest…';
   try{const r=await fetch('/api/comfy/manifest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({video:v,local_video_path:null})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ошибка');saveBlob(`${v.platform||'youtube'}-${v.video_id}.comfy-manifest.json`,JSON.stringify(d.manifest,null,2),'application/json');msg.className='small ok msg';msg.textContent='Manifest сохранён'}catch(e){msg.className='small err msg';msg.textContent=e.message}
 }
-async function downloadVideo(v,msg,{forStory=false}={}){
-  const prompt=forStory?'Скачать MP4 и отправить его в Google Gemini для анализа сюжета?':'Скачать MP4 выбранного кандидата? Для metadata-анализа это не требуется.';
+async function downloadVideo(v,msg,{forStory=false,question=null}={}){
+  const prompt=question||(forStory?'Скачать MP4 и отправить его в Google Gemini для анализа сюжета?':'Скачать MP4 выбранного кандидата? Для metadata-анализа это не требуется.');
   if(!confirm(prompt))return null;
   msg.className='small muted msg';msg.textContent='Скачиваем…';
   try{const r=await fetch('/api/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v.url})});const d=await r.json();if(!r.ok||d.status!=='completed'||!d.path)throw new Error(d.error||apiError(d.detail));v.local_video_path=d.path;downloads++;$('downloadHint').textContent=downloads;msg.className='small ok msg';msg.textContent='MP4: '+d.path;return d.path}catch(e){msg.className='small err msg';msg.textContent=e.message;return null}
