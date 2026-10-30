@@ -11,7 +11,7 @@
     h1{margin:0;font-size:34px}h2{font-size:18px;margin:0 0 12px}.muted{color:var(--muted)}.small{font-size:12px}.card{background:linear-gradient(180deg,#121b30,#0f1729);border:1px solid var(--line);border-radius:16px;padding:16px;margin-top:14px}
     .badge{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;border-radius:999px;background:#18243e;font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:var(--warn)}
     .grid{display:grid;grid-template-columns:repeat(6,minmax(120px,1fr));gap:10px}.field label{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}.field input{width:100%}
-    input,button{font:inherit}input{background:#0b1324;color:#fff;border:1px solid #344361;border-radius:9px;padding:10px}
+    input,button,select{font:inherit}input,select{background:#0b1324;color:#fff;border:1px solid #344361;border-radius:9px;padding:10px}select{width:100%}
     button{border:0;border-radius:9px;padding:10px 13px;cursor:pointer;background:var(--accent);color:#072031;font-weight:750}.secondary{background:#20304d;color:#dce7ff}.danger{background:#4b2a31;color:#ffd7de}
     .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.stat{background:#0b1426;border:1px solid #21314e;border-radius:12px;padding:12px}.stat b{font-size:22px;display:block}.stat span{font-size:11px;color:var(--muted)}
     .tablewrap{overflow:auto;max-height:62vh}table{width:100%;border-collapse:collapse;min-width:1250px}th,td{padding:10px;border-bottom:1px solid #22314d;text-align:left;font-size:12px;vertical-align:top}th{position:sticky;top:0;background:#111a2d;color:#aebbd6;z-index:1}
@@ -69,6 +69,12 @@
   </div>
 
   <div class="card">
+    <h2>Автопоиск нейрослопа</h2>
+    <p id="discoveryStatus" class="small muted" role="status">Загружаем статус…</p>
+    <div class="actions"><button class="secondary" id="discoveryBtn" onclick="startDiscovery()">Запустить сейчас</button><button class="hype" onclick="showHype()">Хайп</button></div>
+  </div>
+
+  <div class="card">
     <h2>Добавить ролик по ссылке</h2>
     <p class="small muted">Публичные ссылки на VK Клипы, TikTok, Instagram Reels и Rutube. Ручное добавление полезно, если поиск на площадке недоступен.</p>
     <div class="field"><label for="importUrl">Ссылка на видео</label><input id="importUrl" type="url" placeholder="https://..." style="width:100%"/></div>
@@ -85,6 +91,16 @@
 
   <div class="card" id="hypePanel" hidden>
     <h2>Хайп сейчас</h2>
+    <div class="field" style="max-width:260px"><label for="hypePlatform">Площадка</label>
+      <select id="hypePlatform" onchange="showHype()">
+        <option value="youtube" selected>YouTube Shorts</option>
+        <option value="">Все площадки</option>
+        <option value="rutube">Rutube</option>
+        <option value="vk">VK Клипы</option>
+        <option value="tiktok">TikTok</option>
+      </select>
+    </div>
+    <label class="platform-choice" style="margin-top:10px"><input type="checkbox" id="hypeAiOnly" checked onchange="showHype()"/>Только AI-видео (проверка Gemini)</label>
     <p id="hypeStatus" class="small muted" role="status"></p>
     <div id="hypePicks" class="picks"></div>
   </div>
@@ -148,7 +164,7 @@
     <div>
       <h2>ComfyUI integration</h2>
       <p class="small muted">Кнопка <b>Comfy JSON</b> формирует стабильный manifest без обязательного MP4. Поля manifest можно сопоставить с inputs любого API-format workflow. Если workflow требует исходное видео, MP4 скачивается только для выбранного кандидата.</p>
-      <p class="small muted"><b>Следующий шаг:</b> добавить расшифровку реплик с таймкодами и передавать её вместе с сюжетом в AutoClip для подготовки клипов.</p>
+      <p class="small muted"><b>Реплики</b> распознают речь выбранного ролика локально и сохраняют проверенный SRT рядом с MP4 для AutoClip. <b>Следующий шаг:</b> сценарий и промпт для своего ролика по сюжету и репликам отобранных референсов.</p>
     </div>
   </div>
 </div>
@@ -383,30 +399,50 @@ function renderTracked(d){
       <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
       <td>${sparkline(t.history)}</td>
       <td>${esc(ago(t.last_checked_at))}${t.last_error?`<div class="small err">${esc(t.last_error)}</div>`:''}</td>
-      <td><div class="actions"><button class="secondary pin">${t.pinned?'Открепить':'Закрепить'}</button><button class="danger untrack">Убрать</button></div></td>`;
+      <td><div class="actions"><button class="secondary brief">JSON</button><button class="secondary pin">${t.pinned?'Открепить':'Закрепить'}</button><button class="danger untrack">Убрать</button></div><div class="small muted msg"></div></td>`;
+    tr.querySelector('.brief').onclick=()=>downloadBrief(v,tr.querySelector('.msg'));
     tr.querySelector('.pin').onclick=()=>trackedAction(fetch('/api/tracked/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:v.platform,video_id:v.video_id,pinned:!t.pinned})}));
     tr.querySelector('.untrack').onclick=()=>{if(confirm('Перестать отслеживать ролик? Уже собранные снимки сохранятся.'))trackedAction(fetch(`/api/tracked/${encodeURIComponent(v.platform)}/${encodeURIComponent(v.video_id)}`,{method:'DELETE'}))};
     body.appendChild(tr);
   }
 }
+function aiBadge(check){
+  if(!check)return '';
+  if(check.ai_generated===true)return `<div class="small ok">ИИ-видео${check.confidence==null?'':' · уверенность '+fixed(check.confidence*100,0)+'%'} — ${esc(check.reason)}</div>`;
+  if(check.ai_generated===false)return `<div class="small warn">Не ИИ — ${esc(check.reason)}</div>`;
+  return `<div class="small warn">AI-проверка не удалась: ${esc(check.reason)}</div>`;
+}
+async function downloadBrief(v,msg){
+  msg.className='small muted msg';msg.textContent='Собираем JSON; сюжет от Gemini может занять до минуты…';
+  try{
+    const r=await fetch(`/api/tracked/${encodeURIComponent(v.platform)}/${encodeURIComponent(v.video_id)}/brief?with_story=true`);const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    saveBlob(`${v.platform}-${v.video_id}.generation.json`,JSON.stringify(d,null,2),'application/json');
+    msg.className=d.story?'small ok msg':'small warn msg';
+    msg.textContent='JSON сохранён: метаданные, рост'+(d.story?', сюжет':'')+(d.ai_check?.ai_generated!=null?', AI-проверка':'')+(d.transcript_srt?', реплики':'')+(d.source.local_video_path?', путь к MP4':'')+(d.story?'':`. Без сюжета: ${d.story_error||'Gemini не ответил'}`);
+  }catch(e){msg.className='small err msg';msg.textContent=e.message}
+}
 async function showHype(){
   const panel=$('hypePanel'),status=$('hypeStatus'),picks=$('hypePicks');
   panel.hidden=false;picks.replaceChildren();status.className='small muted';status.textContent='Выбираем самые быстрорастущие ролики…';
   try{
-    const r=await fetch('/api/hype?limit=5');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
-    if(!d.picks.length){status.textContent='Пока не из чего выбирать: выполните поиск — найденные ролики попадут в отслеживаемые, а трекер измерит их рост.';return}
-    status.textContent=`Лучшие ${d.picks.length} из ${d.considered} отслеживаемых роликов, мусор отсеян. Оценка — место ролика среди найденных по текущей скорости, ускорению, лайкам, охвату сверх подписчиков и свежести.`;
+    const platform=$('hypePlatform').value,aiOnly=$('hypeAiOnly').checked;
+    if(aiOnly)status.textContent='Выбираем лидеров и проверяем через Gemini, что они сгенерированы ИИ (первый раз — до минуты)…';
+    const r=await fetch('/api/hype?limit=5'+(platform?'&platform='+encodeURIComponent(platform):'')+(aiOnly?'&ai_only=true':''));const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    if(!d.picks.length){status.textContent=platform?'На этой площадке пока не из чего выбирать: дождитесь автопоиска или выполните поиск с ней.':'Пока не из чего выбирать: дождитесь автопоиска или выполните поиск — найденные ролики попадут в отслеживаемые.';return}
+    status.textContent=`Лучшие ${d.picks.length} из ${d.considered} отслеживаемых роликов${platform?' на '+$('hypePlatform').selectedOptions[0].textContent:''}, мусор отсеян. Оценка — место ролика среди найденных по текущей скорости, ускорению, лайкам, охвату сверх подписчиков и свежести.`;
     d.picks.forEach((p,i)=>{
       const v=p.video;const card=document.createElement('div');card.className='pick';
       card.innerHTML=`${v.thumbnail_url?`<img src="${esc(v.thumbnail_url)}" alt="">`:''}
         <div class="small muted">#${i+1} · ${esc(platformName(v))} · хайп ${fixed(p.hype_score*100,0)}/100</div>
         <a class="title" target="_blank" rel="noopener noreferrer" href="${esc(v.url)}">${esc(v.title)}</a>
         <div class="chips">${p.reasons.map(reason=>`<span>${esc(reason)}</span>`).join('')}</div>
-        <div class="actions"><button class="secondary story">Сюжет</button><button class="secondary comfy">Comfy JSON</button><button class="danger dl">MP4</button></div>
+        ${aiBadge(p.ai_check)}
+        <div class="actions"><button class="secondary story">Сюжет</button><button class="secondary transcript">Реплики</button><button class="secondary brief">JSON для генерации</button><button class="danger dl">MP4</button></div>
         <div class="small muted msg"></div>`;
       const msg=card.querySelector('.msg');
       card.querySelector('.story').onclick=()=>generateStory(v,msg);
-      card.querySelector('.comfy').onclick=()=>downloadManifest(v,msg);
+      card.querySelector('.transcript').onclick=()=>generateTranscript(v,msg);
+      card.querySelector('.brief').onclick=()=>downloadBrief(v,msg);
       card.querySelector('.dl').onclick=()=>downloadVideo(v,msg);
       picks.appendChild(card);
     });
@@ -417,7 +453,28 @@ async function trackedAction(request){
   try{const r=await request;if(!r.ok){const d=await r.json();throw new Error(apiError(d.detail))}await loadTracked()}
   catch(e){$('trackedStatus').className='small err';$('trackedStatus').textContent=e.message}
 }
-health();loadTracked();setInterval(loadTracked,60000);
+async function loadDiscovery(){
+  const status=$('discoveryStatus');
+  try{
+    const r=await fetch('/api/discovery');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));
+    const youtube=d.platforms.includes('youtube')&&d.youtube_queries_per_run<d.queries.length?` (на YouTube — по ${d.youtube_queries_per_run} за прогон по очереди, чтобы хватило квоты)`:'';
+    const parts=[`Тему вводить не нужно: каждые ${fixed(d.interval_hours,0)} ч сервер сам ищет по ${d.queries.length} маркерам нейрослопа на ${d.platforms.join(', ')}${youtube} и проверяет новые ролики ${d.channels.length} каналов-ферм из «Хайпа». Маркеры — в файле discovery_queries.txt.`];
+    if(d.running)parts.push('Сейчас идёт прогон…');
+    else if(d.last_run){const run=d.last_run;parts.push(`Последний прогон ${ago(run.started_at)}: ${run.candidates} роликов по маркерам, ${run.channel_videos} новых с каналов.`)}
+    else parts.push(d.enabled?'Первый прогон начнётся в течение нескольких минут после запуска сервера.':'Фоновый автопоиск выключен (DISCOVERY_ENABLED=false); можно запустить вручную.');
+    parts.push(`Квота YouTube на автопоиск сегодня: ${d.youtube_units_today} из ${d.youtube_units_per_day}.`);
+    if(d.last_run&&d.last_run.errors.length)parts.push('Проблемы: '+d.last_run.errors.join('; '));
+    status.className='small muted';status.textContent=parts.join(' ');
+    $('discoveryBtn').disabled=d.running;
+  }catch(e){status.className='small err';status.textContent=e.message}
+}
+async function startDiscovery(){
+  $('discoveryBtn').disabled=true;$('discoveryStatus').textContent='Запускаем прогон: поиск по всем маркерам занимает 1–3 минуты…';
+  try{const r=await fetch('/api/discovery/run',{method:'POST'});if(!r.ok){const d=await r.json();throw new Error(apiError(d.detail))}}
+  catch(e){$('discoveryStatus').className='small err';$('discoveryStatus').textContent=e.message;$('discoveryBtn').disabled=false;return}
+  setTimeout(()=>{loadDiscovery();loadTracked()},3000);
+}
+health();loadTracked();loadDiscovery();setInterval(()=>{loadTracked();loadDiscovery()},60000);
 </script>
 </body>
 </html>

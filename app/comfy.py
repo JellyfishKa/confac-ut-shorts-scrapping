@@ -1,6 +1,23 @@
 from datetime import datetime, timezone
 
-from app.models import VideoCandidate
+from app.models import AiVerdict, TrackedVideo, VideoCandidate
+
+
+def build_generation_brief(tracked: TrackedVideo, *, ai_check: AiVerdict | None,
+                           local_video_path: str | None, transcript_srt: str | None) -> dict:
+    """The ComfyUI manifest plus what tracking, the AI check and transcription learned about the video."""
+    brief = build_comfy_manifest(tracked.video, local_video_path)
+    brief["tracking"] = {
+        "pinned": tracked.pinned,
+        "tracked_until": tracked.tracked_until.isoformat(),
+        "last_checked_at": tracked.last_checked_at.isoformat() if tracked.last_checked_at else None,
+        "history": [
+            {"captured_at": point.captured_at.isoformat(), "views": point.views} for point in tracked.history
+        ],
+    }
+    brief["ai_check"] = ai_check.model_dump(mode="json") if ai_check else None
+    brief["transcript_srt"] = transcript_srt
+    return brief
 
 
 def build_comfy_manifest(video: VideoCandidate, local_video_path: str | None = None) -> dict:

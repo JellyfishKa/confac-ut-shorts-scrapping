@@ -32,6 +32,17 @@ class Settings(BaseSettings):
 
     # The "Хайп" pick ignores videos below this many views as junk.
     hype_min_views: int = 1_000
+    # Gemini model that judges whether a hype finalist is AI-generated.
+    ai_check_model: str = "gemini-3.5-flash-lite"
+
+    # Topic-free discovery: search AI-slop markers and poll channel farms in the background.
+    discovery_enabled: bool = True
+    discovery_interval_hours: float = 6.0
+    discovery_queries_file: Path = Path("discovery_queries.txt")
+    discovery_platforms: str = "youtube,rutube"
+    discovery_max_age_hours: int = 72
+    discovery_youtube_units_per_day: int = 6_000
+    discovery_max_channels: int = 100
 
     # Local speech transcription (optional faster-whisper, requirements-transcribe.txt).
     # large-v3-turbo splits speech into subtitle-sized lines; "small" is ~2x faster but coarser.

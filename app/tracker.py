@@ -126,20 +126,33 @@ class TrackedStore:
                 (now.isoformat(),),
             ).fetchall()
         snapshots = SnapshotStore(self.db_path)
-        tracked = []
-        for candidate, pinned, until, checked_at, error in rows:
-            video = VideoCandidate.model_validate_json(candidate)
-            history = snapshots.history(snapshot_key(video.platform, video.video_id))
-            tracked.append(TrackedVideo(
-                video=video,
-                pinned=bool(pinned),
-                tracked_until=datetime.fromisoformat(until),
-                last_checked_at=datetime.fromisoformat(checked_at) if checked_at else None,
-                last_error=error,
-                history=[SnapshotPoint(captured_at=at, views=views) for at, views in history],
-            ))
+        tracked = [self._tracked(row, snapshots) for row in rows]
         tracked.sort(key=lambda item: ranking_key(item.video), reverse=True)
         return tracked
+
+    def get(self, platform: str, video_id: str) -> TrackedVideo | None:
+        """One tracked video with its view history, expired or not."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT candidate, pinned, tracked_until, last_checked_at, last_error "
+                "FROM tracked_videos WHERE platform = ? AND video_id = ?",
+                (platform, video_id),
+            ).fetchone()
+        return self._tracked(row, SnapshotStore(self.db_path)) if row else None
+
+    @staticmethod
+    def _tracked(row: tuple, snapshots: SnapshotStore) -> TrackedVideo:
+        candidate, pinned, until, checked_at, error = row
+        video = VideoCandidate.model_validate_json(candidate)
+        history = snapshots.history(snapshot_key(video.platform, video.video_id))
+        return TrackedVideo(
+            video=video,
+            pinned=bool(pinned),
+            tracked_until=datetime.fromisoformat(until),
+            last_checked_at=datetime.fromisoformat(checked_at) if checked_at else None,
+            last_error=error,
+            history=[SnapshotPoint(captured_at=at, views=views) for at, views in history],
+        )
 
     def set_pinned(self, platform: str, video_id: str, pinned: bool, now: datetime | None = None) -> bool:
         """Pin to track without a deadline; unpinning restarts the normal window."""

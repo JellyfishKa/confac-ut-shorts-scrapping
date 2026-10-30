@@ -5,19 +5,21 @@ from typing import Annotated
 
 import httpx
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi import Path as UrlPath
 from fastapi import Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.comfy import build_comfy_manifest
+from app.ai_check import AiVerdictStore, check_videos
+from app.comfy import build_comfy_manifest, build_generation_brief
 from app.config import settings
-from app.downloader import VideoDownloader, remember_download
+from app.downloader import VideoDownloader, downloaded_path, remember_download
 from app.import_video import YOUTUBE_HOSTS, _validated_video_url, import_video
 from app.models import (
     ComfyManifestRequest,
     ComfyManifestResponse,
+    DiscoveryStatus,
     DownloadRequest,
     DownloadResponse,
     ImportRequest,
@@ -37,8 +39,12 @@ from app.models import (
     TranscriptRequest,
     VideoCandidate,
 )
-from app.story import create_story
-from app.hype import pick_hype
+from app.story import StoryStore, create_story
+from app.discovery import is_running as discovery_running
+from app.discovery import run_forever as discover_forever
+from app.discovery import run_once as run_discovery_once
+from app.discovery import status as discovery_status
+from app.hype import AI_CHECK_POOL, pick_hype
 from app.transcribe import create_transcript, save_srt
 from app.instagram_search import InstagramHashtagProvider
 from app.pipeline import rank
@@ -52,12 +58,17 @@ from app.youtube import YouTubeProvider
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    tracker = asyncio.create_task(run_forever()) if settings.tracker_enabled else None
+    tasks = []
+    if settings.tracker_enabled:
+        tasks.append(asyncio.create_task(run_forever()))
+    if settings.discovery_enabled:
+        tasks.append(asyncio.create_task(discover_forever(search_videos)))
     yield
-    if tracker is not None:
-        tracker.cancel()
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
         with suppress(asyncio.CancelledError):
-            await tracker
+            await task
 
 
 app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0", lifespan=lifespan)
@@ -164,9 +175,39 @@ async def import_video_url(request: ImportRequest) -> ImportResponse:
     return imported
 
 
+@app.get("/api/discovery", response_model=DiscoveryStatus)
+def discovery() -> DiscoveryStatus:
+    return discovery_status()
+
+
+@app.post("/api/discovery/run", status_code=202)
+def start_discovery(background: BackgroundTasks) -> dict:
+    if discovery_running():
+        raise HTTPException(status_code=409, detail="Автопоиск уже идёт.")
+    background.add_task(run_discovery_once, search_videos)
+    return {"status": "started"}
+
+
 @app.get("/api/hype", response_model=HypeResponse)
-def hype(limit: Annotated[int, Query(ge=1, le=20)] = 5) -> HypeResponse:
-    return pick_hype(TrackedStore().active(), limit)
+async def hype(
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    platform: SearchPlatform | None = None,
+    ai_only: bool = False,
+) -> HypeResponse:
+    """With `ai_only`, Gemini checks the leaders and videos it judges human-made drop out."""
+    if not ai_only:
+        return pick_hype(TrackedStore().active(), limit, platform)
+    if not settings.gemini_api_key:
+        raise HTTPException(status_code=503, detail="Для проверки «только AI» задайте GEMINI_API_KEY в .env и перезапустите сервер.")
+    result = pick_hype(TrackedStore().active(), AI_CHECK_POOL, platform)
+    verdicts = await check_videos([pick.video for pick in result.picks])
+    picks = []
+    for pick in result.picks:
+        pick.ai_check = verdicts.get((pick.video.platform, pick.video.video_id))
+        if pick.ai_check is None or pick.ai_check.ai_generated is not False:
+            picks.append(pick)
+    result.picks = picks[:limit]
+    return result
 
 
 @app.get("/api/tracked", response_model=TrackedResponse)
@@ -183,6 +224,44 @@ def pin_tracked_video(request: PinRequest) -> dict:
     if not TrackedStore().set_pinned(request.platform, request.video_id, request.pinned):
         raise HTTPException(status_code=404, detail="Ролик не отслеживается.")
     return {"status": "ok", "pinned": request.pinned}
+
+
+@app.get("/api/tracked/{platform}/{video_id}/brief")
+async def generation_brief(
+    platform: SearchPlatform,
+    video_id: Annotated[str, UrlPath(max_length=200)],
+    with_story: bool = False,
+) -> dict:
+    """Everything known about a tracked video, as one JSON for whoever generates content from it.
+
+    With `with_story`, a story not yet stored is requested from Gemini; if that fails,
+    the JSON says why in `story_error` instead of failing as a whole.
+    """
+    tracked = TrackedStore().get(platform, video_id)
+    if tracked is None:
+        raise HTTPException(status_code=404, detail="Ролик не отслеживается.")
+    mp4 = downloaded_path(tracked.video.url)
+    srt = mp4.with_suffix(".srt") if mp4 else None
+    story = StoryStore().get(tracked.video.url)
+    story_error = None
+    if with_story and story is None:
+        try:
+            await create_story(StoryRequest(
+                url=tracked.video.url, local_video_path=str(mp4) if mp4 and platform != "youtube" else None,
+            ))
+            story = StoryStore().get(tracked.video.url)
+        except HTTPException as exc:
+            story_error = exc.detail
+    brief = build_generation_brief(
+        tracked,
+        ai_check=AiVerdictStore().get(platform, video_id),
+        local_video_path=str(mp4) if mp4 else None,
+        transcript_srt=srt.read_text(encoding="utf-8") if srt and srt.is_file() else None,
+    )
+    brief["story"] = story
+    if with_story:
+        brief["story_error"] = story_error
+    return brief
 
 
 @app.delete("/api/tracked/{platform}/{video_id}")

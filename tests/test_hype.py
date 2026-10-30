@@ -73,6 +73,15 @@ def test_reasons_read_naturally(monkeypatch):
     assert "ускоряется ×10+" in reasons
 
 
+def test_reuploads_with_the_same_title_appear_once():
+    original = tracked("a", speed=3_000)
+    copy = tracked("b", speed=2_000)
+    copy.video.title = "  A "
+    other = tracked("c", speed=1_000)
+    result = pick_hype([copy, other, original], limit=5)
+    assert [pick.video.video_id for pick in result.picks] == ["a", "c"]
+
+
 def test_hype_without_tracker_history_falls_back_to_average_speed():
     result = pick_hype([tracked("slow", speed=100), tracked("fast", speed=3_000)], limit=1)
     assert [pick.video.video_id for pick in result.picks] == ["fast"]
@@ -102,3 +111,26 @@ def test_hype_api_uses_tracked_videos(monkeypatch):
     assert data["considered"] == 1
     assert [pick["video"]["video_id"] for pick in data["picks"]] == ["a"]
     assert TestClient(app).get("/api/hype", params={"limit": 0}).status_code == 422
+
+
+def test_platform_filter_ranks_within_that_platform():
+    youtube_slow = tracked("yt-slow", speed=100)
+    youtube_fast = tracked("yt-fast", speed=900)
+    rutube = tracked("rt", speed=50_000)
+    rutube.video.platform = "rutube"
+
+    everything = pick_hype([youtube_slow, youtube_fast, rutube], limit=5)
+    assert [pick.video.video_id for pick in everything.picks] == ["rt", "yt-fast", "yt-slow"]
+    youtube = pick_hype([youtube_slow, youtube_fast, rutube], limit=5, platform="youtube")
+    assert youtube.considered == 2
+    assert [pick.video.video_id for pick in youtube.picks] == ["yt-fast", "yt-slow"]
+    # Within YouTube alone the fast video is the best one, not a middle rank behind Rutube.
+    assert youtube.picks[0].hype_score > everything.picks[1].hype_score
+
+
+def test_hype_api_filters_by_platform():
+    TrackedStore().track([tracked("a", speed=500).video], now=datetime.now(timezone.utc))
+    client = TestClient(app)
+    assert client.get("/api/hype", params={"platform": "youtube"}).json()["considered"] == 1
+    assert client.get("/api/hype", params={"platform": "rutube"}).json()["considered"] == 0
+    assert client.get("/api/hype", params={"platform": "myspace"}).status_code == 422

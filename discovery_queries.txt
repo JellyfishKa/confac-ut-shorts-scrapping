@@ -1,0 +1,78 @@
+# Маркеры нейрослопа для автопоиска без темы: по одному запросу на строку.
+# Строка, которая начинается с "# " (решётка и пробел), — комментарий; хештег без пробела, например #aivideo, — запрос.
+# Rutube ищет по всем маркерам в каждом прогоне. YouTube — по очереди, столько маркеров за прогон,
+# сколько позволяет DISCOVERY_YOUTUBE_UNITS_PER_DAY (поиск стоит около 102 единиц квоты).
+# Сервер перечитывает файл перед каждым прогоном.
+
+# Хештеги, которые чаще всего стоят у быстрорастущих AI-шортсов (по данным прогонов)
+#aivideo
+#aianimation
+#aishorts
+#aigenerated
+#aicat
+#italianbrainrot
+#brainrot
+#aiart
+#aistory
+#aifunny
+#emotionalstory
+#ии
+#нейросети
+#асмр
+
+# Генераторы видео
+sora ai
+sora 2
+veo 3
+kling ai
+hailuo ai
+runway ai video
+midjourney video
+pika ai
+
+# Персонажи итальянского брейнрота
+italian brainrot
+tung tung tung sahur
+tralalero tralala
+ballerina cappuccina
+bombardiro crocodilo
+brr brr patapim
+chimpanzini bananini
+
+# Форматы и тренды нейрослопа
+ai animation
+ai generated
+ai asmr
+ai asmr cutting
+ai cat story
+ai cat drama
+ai love story
+ai baby
+ai baby podcast
+ai animals
+ai animal fusion
+ai giant animals
+ai fruit
+ai food
+ai vlog
+ai bigfoot vlog
+ai street interview
+ai horror short
+ai transformation
+ai pixar style
+
+# Русскоязычный нейрослоп
+ии анимация
+нейросеть видео
+сгенерировано нейросетью
+ии видео
+ии мультик
+нейросеть мультфильм
+живые фрукты ии
+итальянский брейнрот
+тунг тунг сахур
+котики нейросеть
+ии котики драма
+асмр нейросеть
+ии животные
+нейросеть приколы

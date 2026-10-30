@@ -34,6 +34,14 @@ def was_downloaded_for(url: str, path: Path) -> bool:
     return row is not None and Path(row[0]) == path
 
 
+def downloaded_path(url: str) -> Path | None:
+    """The local file the app downloaded for this URL, if it is still there."""
+    with closing(_registry()) as conn:
+        row = conn.execute("SELECT path FROM downloads WHERE url = ?", (url,)).fetchone()
+    path = Path(row[0]) if row else None
+    return path if path and path.is_file() else None
+
+
 def downloaded_mp4(path_text: str, source_url: str) -> Path:
     """The local MP4 the app downloaded for this URL, or 422 for any other file."""
     try:

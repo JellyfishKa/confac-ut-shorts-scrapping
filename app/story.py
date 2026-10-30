@@ -1,6 +1,9 @@
 import asyncio
 import base64
+import sqlite3
 import subprocess
+from contextlib import closing
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import HTTPException
@@ -54,6 +57,9 @@ def _local_video_input(path_text: str, source_url: str) -> dict[str, str]:
     return {"type": "video", "data": base64.b64encode(contents).decode("ascii"), "mime_type": "video/mp4"}
 
 
+GEO_BLOCKED = "Gemini недоступен из вашего региона: включите VPN или прокси и повторите."
+
+
 def _upstream_error(status_code: int) -> HTTPException:
     if status_code in {401, 403}:
         return HTTPException(status_code=502, detail="Gemini отклонил ключ API или доступ к модели. Проверьте GEMINI_API_KEY и настройки проекта.")
@@ -100,6 +106,8 @@ async def create_story(request: StoryRequest) -> StoryResponse:
                     break
             response.raise_for_status()
     except httpx.HTTPStatusError as exc:
+        if "location is not supported" in exc.response.text:
+            raise HTTPException(status_code=503, detail=GEO_BLOCKED) from exc
         raise _upstream_error(exc.response.status_code) from exc
     except httpx.RequestError as exc:
         raise HTTPException(status_code=502, detail="Не удалось связаться с Gemini. Попробуйте позже.") from exc
@@ -117,4 +125,34 @@ async def create_story(request: StoryRequest) -> StoryResponse:
         raise HTTPException(status_code=502, detail="Gemini вернул неожиданный ответ.") from exc
     if not story:
         raise HTTPException(status_code=502, detail="Gemini не вернул текст сюжета. Проверьте доступность видео.")
-    return StoryResponse(url=url, model=model, story=story)
+    result = StoryResponse(url=url, model=model, story=story)
+    StoryStore().save(result)
+    return result
+
+
+class StoryStore:
+    """The latest story per video URL, so the generation JSON can include it without a new Gemini call."""
+
+    def __init__(self):
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        self.db_path = settings.data_dir / "snapshots.sqlite3"
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS stories ("
+                "url TEXT PRIMARY KEY, model TEXT NOT NULL, story TEXT NOT NULL, created_at TEXT NOT NULL)"
+            )
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.db_path)
+
+    def save(self, story: StoryResponse) -> None:
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO stories(url, model, story, created_at) VALUES (?, ?, ?, ?)",
+                (story.url, story.model, story.story, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def get(self, url: str) -> dict | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute("SELECT model, story, created_at FROM stories WHERE url = ?", (url,)).fetchone()
+        return {"text": row[1], "model": row[0], "created_at": row[2]} if row else None

@@ -125,16 +125,58 @@ class TrackedResponse(BaseModel):
     videos: list[TrackedVideo]
 
 
+class AiVerdict(BaseModel):
+    """Whether a video is AI-generated; `ai_generated` is None when the check failed."""
+    ai_generated: bool | None
+    confidence: float | None = None
+    reason: str
+    model: str | None = None
+    checked_at: datetime
+
+
 class HypePick(BaseModel):
     video: VideoCandidate
     hype_score: float
     acceleration: float | None
     reasons: list[str]
+    ai_check: AiVerdict | None = None
 
 
 class HypeResponse(BaseModel):
     considered: int
     picks: list[HypePick]
+
+
+class DiscoveryRun(BaseModel):
+    started_at: datetime
+    finished_at: datetime
+    queries: int
+    candidates: int
+    channels_checked: int
+    channel_videos: int
+    youtube_units: int
+    errors: list[str]
+
+
+class WatchedChannel(BaseModel):
+    channel_id: str
+    title: str
+    added_at: datetime
+    last_checked_at: datetime | None
+
+
+class DiscoveryStatus(BaseModel):
+    enabled: bool
+    running: bool
+    interval_hours: float
+    platforms: list[str]
+    queries: list[str]
+    youtube_queries_per_run: int
+    youtube_units_today: int
+    youtube_units_per_day: int
+    next_run_at: datetime | None
+    last_run: DiscoveryRun | None
+    channels: list[WatchedChannel]
 
 
 class PinRequest(BaseModel):

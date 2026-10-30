@@ -12,6 +12,9 @@ from datetime import timedelta
 from app.config import settings
 from app.models import HypePick, HypeResponse, SnapshotPoint, TrackedVideo
 
+# How many leaders the AI check looks at to fill the requested picks after dropping human-made videos.
+AI_CHECK_POOL = 15
+
 WEIGHTS: dict[str, float] = {
     "speed": 0.40,
     "acceleration": 0.25,
@@ -50,8 +53,12 @@ def acceleration(history: list[SnapshotPoint]) -> float | None:
     return round(rate(latest, middle) / previous, 2)
 
 
-def pick_hype(tracked: list[TrackedVideo], limit: int) -> HypeResponse:
-    pool = [item for item in tracked if _is_candidate(item)]
+def pick_hype(tracked: list[TrackedVideo], limit: int, platform: str | None = None) -> HypeResponse:
+    """With a platform, videos are ranked against that platform's videos only."""
+    pool = [
+        item for item in tracked
+        if _is_candidate(item) and (platform is None or item.video.platform == platform)
+    ]
     accelerations = {id(item): acceleration(item.history) for item in pool}
     signals: dict[str, Callable[[TrackedVideo], float | None]] = {
         "speed": _speed,
@@ -74,7 +81,11 @@ def pick_hype(tracked: list[TrackedVideo], limit: int) -> HypeResponse:
             reasons=_reasons(item, accelerations[id(item)]),
         ))
     picks.sort(key=lambda pick: pick.hype_score, reverse=True)
-    return HypeResponse(considered=len(pool), picks=picks[:limit])
+    # Slop is re-uploaded under the same title; show each video once, its best copy.
+    unique = {}
+    for pick in picks:
+        unique.setdefault(" ".join(pick.video.title.lower().split()) or pick.video.video_id, pick)
+    return HypeResponse(considered=len(pool), picks=list(unique.values())[:limit])
 
 
 def _speed(item: TrackedVideo) -> float | None:
