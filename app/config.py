@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     # Growth is measured against a snapshot at least this old; closer repeats are noise.
     growth_min_interval_minutes: float = 30.0
 
+    # Videos found by search are re-polled by ID while the server runs.
+    tracker_enabled: bool = True
+    tracker_interval_minutes: float = 30.0
+    tracker_hours: float = 48.0
+
     weight_views_per_hour: float = 0.55
     weight_like_rate: float = 0.30
     weight_comment_rate: float = 0.15

@@ -103,3 +103,29 @@ class ComfyManifestRequest(BaseModel):
 
 class ComfyManifestResponse(BaseModel):
     manifest: dict[str, Any]
+
+
+class SnapshotPoint(BaseModel):
+    captured_at: datetime
+    views: int
+
+
+class TrackedVideo(BaseModel):
+    video: VideoCandidate
+    pinned: bool
+    tracked_until: datetime
+    last_checked_at: datetime | None
+    last_error: str | None
+    history: list[SnapshotPoint]
+
+
+class TrackedResponse(BaseModel):
+    interval_minutes: float
+    tracked_hours: float
+    videos: list[TrackedVideo]
+
+
+class PinRequest(BaseModel):
+    platform: SearchPlatform
+    video_id: str = Field(min_length=1, max_length=200)
+    pinned: bool

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.models import SearchRequest
+from app.pipeline import Counts
 from app.youtube import YouTubeProvider
 
 
@@ -40,3 +41,27 @@ def test_youtube_search_keeps_hidden_likes_unknown(monkeypatch, tmp_path):
     with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
         assert conn.execute("SELECT video_id FROM video_snapshots").fetchall() == [("abc",)]
         assert conn.execute("SELECT video_id FROM view_snapshots").fetchall() == [("def",)]
+
+
+def test_youtube_counts_use_one_request_per_50_ids(monkeypatch):
+    batches = []
+
+    def handler(request):
+        assert request.url.path.endswith("/videos")
+        assert request.url.params["part"] == "statistics"
+        ids = request.url.params["id"].split(",")
+        batches.append(len(ids))
+        # One video disappeared: the API omits it from items.
+        return httpx.Response(200, json={"items": [
+            {"id": video_id, "statistics": {"viewCount": "10", "likeCount": "2"}}
+            for video_id in ids if video_id != "v7"
+        ]})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr("app.youtube.httpx.AsyncClient",
+                        lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
+    counts = asyncio.run(YouTubeProvider(api_key="key").fetch_counts([f"v{i}" for i in range(120)]))
+
+    assert batches == [50, 50, 20]
+    assert counts["v0"] == Counts(10, 2, None)
+    assert "v7" not in counts and len(counts) == 119

@@ -1,9 +1,12 @@
 import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Annotated
 
 import httpx
 
 from fastapi import FastAPI, HTTPException
+from fastapi import Path as UrlPath
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,11 +21,14 @@ from app.models import (
     DownloadResponse,
     ImportRequest,
     ImportResponse,
+    PinRequest,
     PlatformSearchStatus,
+    SearchPlatform,
     SearchRequest,
     SearchResponse,
     StoryRequest,
     StoryResponse,
+    TrackedResponse,
     VideoCandidate,
 )
 from app.story import create_story
@@ -31,10 +37,22 @@ from app.pipeline import rank
 from app.rutube import RutubeProvider
 from app.search_errors import ProviderUnavailableError
 from app.tiktok_search import TikTokResearchProvider
+from app.tracker import TrackedStore, run_forever
 from app.vk_search import VkProvider
 from app.youtube import YouTubeProvider
 
-app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    tracker = asyncio.create_task(run_forever()) if settings.tracker_enabled else None
+    yield
+    if tracker is not None:
+        tracker.cancel()
+        with suppress(asyncio.CancelledError):
+            await tracker
+
+
+app = FastAPI(title="YouTube Shorts Metadata Lab", version="0.2.0", lifespan=lifespan)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -94,6 +112,7 @@ async def search_videos(request: SearchRequest) -> SearchResponse:
     for _, candidates, _ in results:
         for video in candidates:
             unique[(video.platform, video.video_id)] = video
+    TrackedStore().track(unique.values())
     videos = rank(unique.values(), request.limit)
     statuses = [result[2] for result in results]
     for status in statuses:
@@ -122,7 +141,32 @@ async def story(request: StoryRequest) -> StoryResponse:
 
 @app.post("/api/import", response_model=ImportResponse)
 async def import_video_url(request: ImportRequest) -> ImportResponse:
-    return await import_video(request)
+    imported = await import_video(request)
+    TrackedStore().track([imported.video])
+    return imported
+
+
+@app.get("/api/tracked", response_model=TrackedResponse)
+def tracked_videos() -> TrackedResponse:
+    return TrackedResponse(
+        interval_minutes=settings.tracker_interval_minutes,
+        tracked_hours=settings.tracker_hours,
+        videos=TrackedStore().active(),
+    )
+
+
+@app.post("/api/tracked/pin")
+def pin_tracked_video(request: PinRequest) -> dict:
+    if not TrackedStore().set_pinned(request.platform, request.video_id, request.pinned):
+        raise HTTPException(status_code=404, detail="Ролик не отслеживается.")
+    return {"status": "ok", "pinned": request.pinned}
+
+
+@app.delete("/api/tracked/{platform}/{video_id}")
+def untrack_video(platform: SearchPlatform, video_id: Annotated[str, UrlPath(max_length=200)]) -> dict:
+    if not TrackedStore().remove(platform, video_id):
+        raise HTTPException(status_code=404, detail="Ролик не отслеживается.")
+    return {"status": "removed"}
 
 
 @app.post("/api/download", response_model=DownloadResponse)

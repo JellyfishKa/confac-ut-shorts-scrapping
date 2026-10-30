@@ -63,6 +63,23 @@ class SnapshotStore:
                 "ON view_snapshots(video_id, captured_at)"
             )
 
+    def history(self, video_id: str, limit: int = 96) -> list[tuple[datetime, int]]:
+        """Recent views over time from both snapshot tables, oldest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT captured_at, views FROM (
+                    SELECT captured_at, views FROM video_snapshots WHERE video_id = ?
+                    UNION ALL
+                    SELECT captured_at, views FROM view_snapshots WHERE video_id = ?
+                )
+                ORDER BY captured_at DESC
+                LIMIT ?
+                """,
+                (video_id, video_id, limit),
+            ).fetchall()
+        return [(datetime.fromisoformat(captured_at), int(views)) for captured_at, views in reversed(rows)]
+
     def observe_views(
         self,
         video_id: str,

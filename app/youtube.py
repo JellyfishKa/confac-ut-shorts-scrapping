@@ -5,7 +5,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
-from app.pipeline import CandidateBuilder, RawVideo, rank, resolve_filters
+from app.pipeline import CandidateBuilder, Counts, RawVideo, rank, resolve_filters
 from app.search_errors import ProviderUnavailableError
 
 YOUTUBE_API = "https://www.googleapis.com/youtube/v3"
@@ -34,6 +34,28 @@ class YouTubeProvider:
                 "YOUTUBE_API_KEY is not configured. Copy .env.example to .env "
                 "and paste an API key with YouTube Data API v3 enabled."
             )
+
+    async def fetch_counts(self, video_ids: list[str]) -> dict[str, Counts]:
+        """Current counters by video ID: one quota unit per 50 videos, unlike 100 per search.
+
+        Deleted or private videos are absent from the result.
+        """
+        counts: dict[str, Counts] = {}
+        async with httpx.AsyncClient(timeout=20) as client:
+            for start in range(0, len(video_ids), 50):
+                response = await client.get(
+                    f"{YOUTUBE_API}/videos",
+                    params={"part": "statistics", "id": ",".join(video_ids[start:start + 50]), "key": self.api_key},
+                )
+                response.raise_for_status()
+                for item in response.json().get("items", []):
+                    statistics = item.get("statistics", {})
+                    counts[item["id"]] = Counts(
+                        _count(statistics.get("viewCount")),
+                        _count(statistics.get("likeCount")),
+                        _count(statistics.get("commentCount")),
+                    )
+        return counts
 
     async def search(self, request: SearchRequest) -> tuple[int, list[VideoCandidate]]:
         filters = resolve_filters(request)

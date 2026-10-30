@@ -22,6 +22,7 @@
     .explain{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}@media(max-width:900px){.grid,.stats,.explain{grid-template-columns:1fr 1fr}.wrap{padding:16px}}@media(max-width:600px){.grid,.stats,.explain{grid-template-columns:1fr}}
     code{background:#09111f;padding:2px 5px;border-radius:5px}
     #storyText{white-space:pre-wrap;line-height:1.55;max-height:50vh;overflow:auto}
+    #trackedPanel table{min-width:760px}.spark{display:block;color:var(--accent)}
   </style>
 </head>
 <body>
@@ -84,6 +85,17 @@
       </tr></thead>
       <tbody id="results"><tr><td colspan="10" class="muted">Найдите видео по теме или добавьте ссылку.</td></tr></tbody>
     </table>
+  </div>
+
+  <div class="card" id="trackedPanel">
+    <h2>Отслеживаемые</h2>
+    <p id="trackedStatus" class="small muted" role="status">Загружаем список…</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Видео</th><th>Views</th><th>Δ views/h</th><th>Динамика просмотров</th><th>Проверка</th><th>Действия</th></tr></thead>
+        <tbody id="tracked"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card" id="storyPanel" hidden>
@@ -160,7 +172,7 @@ async function searchVideos(){
     $('status').textContent=anySucceeded
       ? `Готово: ${searchResults.length} кандидатов. MP4 не скачивались. ${searchResults.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':`Для расчёта фактической динамики повторите поиск не раньше чем через ${growthMinutes} мин.`}`
       : 'Ни одна выбранная площадка не выполнила поиск. Причины указаны ниже.';
-    refreshVideos();
+    refreshVideos();loadTracked();
   }catch(e){$('status').className='err small';$('status').textContent=e.message}
 }
 function renderPlatformStatuses(statuses){
@@ -184,7 +196,7 @@ async function importVideo(){
     const response=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:raw})});
     const data=await response.json();if(!response.ok)throw new Error(apiError(data.detail));
     const video=data.video;if(!video||!video.url)throw new Error('Сервис не вернул данные о видео.');
-    importedVideos=importedVideos.filter(v=>v.url!==video.url);importedVideos.unshift(video);refreshVideos();
+    importedVideos=importedVideos.filter(v=>v.url!==video.url);importedVideos.unshift(video);refreshVideos();loadTracked();
     status.className='small ok';status.textContent=`Добавлено: ${platformName(video)} · ${video.title}`;
     $('importUrl').value='';
   }catch(e){status.className='small err';status.textContent=e.message}
@@ -253,7 +265,47 @@ function exportCSV(){
   const q=x=>`"${String(x??'').replaceAll('"','""')}"`; const rows=[cols.join(','),...currentVideos.map(v=>cols.map(c=>q(v[c])).join(','))];
   saveBlob('video-candidates.csv',rows.join('\n'),'text/csv');
 }
-health();
+async function loadTracked(){
+  try{const r=await fetch('/api/tracked');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));renderTracked(d)}
+  catch(e){$('trackedStatus').className='small err';$('trackedStatus').textContent=e.message}
+}
+function sparkline(points){
+  if(points.length<2)return '<span class="muted small">нужно 2+ снимка</span>';
+  const w=140,h=34,views=points.map(p=>p.views),times=points.map(p=>new Date(p.captured_at).getTime());
+  const low=Math.min(...views),span=(Math.max(...views)-low)||1,start=times[0],duration=(times.at(-1)-start)||1;
+  const coords=points.map((p,i)=>`${((times[i]-start)/duration*w).toFixed(1)},${(h-2-(p.views-low)/span*(h-4)).toFixed(1)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="Просмотры: ${fmt(views[0])} → ${fmt(views.at(-1))}"><polyline points="${coords}" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>`;
+}
+function ago(iso){
+  if(!iso)return '—';const minutes=Math.round((Date.now()-new Date(iso))/60000);
+  return minutes<1?'только что':minutes<60?`${minutes} мин назад`:`${Math.round(minutes/60)} ч назад`;
+}
+function renderTracked(d){
+  $('trackedStatus').className='small muted';
+  $('trackedStatus').textContent=`Ролики из поиска отслеживаются ${fixed(d.tracked_hours,0)} ч, закреплённые — без срока. Сервер перепроверяет их раз в ${fixed(d.interval_minutes,0)} мин, пока запущен.`;
+  const body=$('tracked');
+  if(!d.videos.length){body.innerHTML='<tr><td colspan="6" class="muted">Пока пусто: ролики появятся после поиска.</td></tr>';return}
+  body.innerHTML='';
+  for(const t of d.videos){
+    const v=t.video;const growth=v.growth_views_per_hour;const tr=document.createElement('tr');
+    const until=t.pinned?'закреплён':'до '+new Date(t.tracked_until).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    tr.innerHTML=`
+      <td><a class="title" target="_blank" rel="noopener noreferrer" href="${esc(v.url)}">${esc(v.title)}</a><div class="muted">${esc(platformName(v))} · ${esc(until)}</div></td>
+      <td>${fmt(v.views)}</td>
+      <td class="${growth==null?'muted':growth>=0?'ok':'err'}">${growth==null?'—':fmt(growth)}</td>
+      <td>${sparkline(t.history)}</td>
+      <td>${esc(ago(t.last_checked_at))}${t.last_error?`<div class="small err">${esc(t.last_error)}</div>`:''}</td>
+      <td><div class="actions"><button class="secondary pin">${t.pinned?'Открепить':'Закрепить'}</button><button class="danger untrack">Убрать</button></div></td>`;
+    tr.querySelector('.pin').onclick=()=>trackedAction(fetch('/api/tracked/pin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:v.platform,video_id:v.video_id,pinned:!t.pinned})}));
+    tr.querySelector('.untrack').onclick=()=>{if(confirm('Перестать отслеживать ролик? Уже собранные снимки сохранятся.'))trackedAction(fetch(`/api/tracked/${encodeURIComponent(v.platform)}/${encodeURIComponent(v.video_id)}`,{method:'DELETE'}))};
+    body.appendChild(tr);
+  }
+}
+async function trackedAction(request){
+  try{const r=await request;if(!r.ok){const d=await r.json();throw new Error(apiError(d.detail))}await loadTracked()}
+  catch(e){$('trackedStatus').className='small err';$('trackedStatus').textContent=e.message}
+}
+health();loadTracked();setInterval(loadTracked,60000);
 </script>
 </body>
 </html>

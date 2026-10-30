@@ -1,16 +1,19 @@
 """Search public short Rutube videos by a text query."""
 
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from app.models import SearchRequest, VideoCandidate
-from app.pipeline import CandidateBuilder, RawVideo, rank, resolve_filters
+from app.pipeline import CandidateBuilder, Counts, RawVideo, rank, resolve_filters
 
 
 RUTUBE_SEARCH = "https://rutube.ru/api/search/video/"
+RUTUBE_VIDEO = "https://rutube.ru/api/video/{}/"
 _RUTUBE_TIMEZONE = timezone(timedelta(hours=3))
+_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def _count(value: object) -> int | None:
@@ -51,6 +54,27 @@ def _next_page(value: object) -> str | None:
     if parsed.scheme == "https" and parsed.hostname == "rutube.ru" and parsed.path == "/api/search/video/":
         return url
     return None
+
+
+async def fetch_counts(video_ids: list[str]) -> dict[str, Counts]:
+    """Current views by video ID; the public API exposes no likes or comments.
+
+    Deleted, hidden or missing videos are absent from the result.
+    """
+    counts: dict[str, Counts] = {}
+    async with httpx.AsyncClient(timeout=20) as client:
+        for video_id in video_ids:
+            if not _VIDEO_ID.fullmatch(video_id):
+                continue
+            response = await client.get(RUTUBE_VIDEO.format(video_id))
+            if response.status_code == 404:
+                continue
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or payload.get("is_deleted") or payload.get("is_hidden"):
+                continue
+            counts[video_id] = Counts(_count(payload.get("hits")))
+    return counts
 
 
 class RutubeProvider:

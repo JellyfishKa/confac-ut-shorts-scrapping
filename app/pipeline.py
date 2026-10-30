@@ -7,6 +7,7 @@ ranking happen here, so every platform follows the same rules.
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
@@ -31,6 +32,18 @@ class RawVideo:
     channel_title: str = ""
     thumbnail_url: str | None = None
     subscribers: int | None = None
+
+
+class Counts(NamedTuple):
+    """Current public counters of one video, as returned when re-polling it by ID."""
+    views: int | None
+    likes: int | None = None
+    comments: int | None = None
+
+
+def snapshot_key(platform: str, video_id: str) -> str:
+    # YouTube snapshots predate platform prefixes; keep their keys stable.
+    return video_id if platform == "youtube" else f"{platform}:{video_id}"
 
 
 @dataclass(slots=True)
@@ -101,11 +114,12 @@ class CandidateBuilder:
             return GrowthStats()
         if self._snapshots is None:
             self._snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
-        # YouTube snapshots predate platform prefixes; keep their keys stable.
-        key = raw.video_id if raw.platform == "youtube" else f"{raw.platform}:{raw.video_id}"
+        key = snapshot_key(raw.platform, raw.video_id)
         if raw.likes is not None and raw.comments is not None:
-            return self._snapshots.observe(key, views=raw.views, likes=raw.likes, comments=raw.comments)
-        return self._snapshots.observe_views(key, views=raw.views)
+            return self._snapshots.observe(
+                key, views=raw.views, likes=raw.likes, comments=raw.comments, captured_at=self.now,
+            )
+        return self._snapshots.observe_views(key, views=raw.views, captured_at=self.now)
 
 
 def _public_stats(raw: RawVideo) -> PublicStats:
