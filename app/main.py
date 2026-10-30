@@ -26,12 +26,17 @@ from app.models import (
     SearchPlatform,
     SearchRequest,
     SearchResponse,
+    SrtRequest,
+    SrtResponse,
     StoryRequest,
     StoryResponse,
     TrackedResponse,
+    Transcript,
+    TranscriptRequest,
     VideoCandidate,
 )
 from app.story import create_story
+from app.transcribe import create_transcript, save_srt
 from app.instagram_search import InstagramHashtagProvider
 from app.pipeline import rank
 from app.rutube import RutubeProvider
@@ -137,6 +142,16 @@ def comfy_manifest(request: ComfyManifestRequest) -> ComfyManifestResponse:
 @app.post("/api/story", response_model=StoryResponse)
 async def story(request: StoryRequest) -> StoryResponse:
     return await create_story(request)
+
+
+@app.post("/api/transcript", response_model=Transcript)
+async def transcript(request: TranscriptRequest) -> Transcript:
+    return await create_transcript(request)
+
+
+@app.post("/api/transcript/srt", response_model=SrtResponse)
+def transcript_srt(request: SrtRequest) -> SrtResponse:
+    return save_srt(request)
 
 
 @app.post("/api/import", response_model=ImportResponse)

@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     tracker_interval_minutes: float = 30.0
     tracker_hours: float = 48.0
 
+    # Local speech transcription (optional faster-whisper, requirements-transcribe.txt).
+    # large-v3-turbo splits speech into subtitle-sized lines; "small" is ~2x faster but coarser.
+    whisper_model: str = "large-v3-turbo"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_language: str = ""  # empty: detect the language of each video
+
     weight_views_per_hour: float = 0.55
     weight_like_rate: float = 0.30
     weight_comment_rate: float = 0.15
