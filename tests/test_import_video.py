@@ -65,7 +65,9 @@ def test_import_preserves_missing_metrics_as_null(monkeypatch, tmp_path):
     assert video.likes is None and video.comments is None
     assert video.published_at is None and video.age_hours is None
     assert video.views_per_hour is None and video.popularity_score is None
-    assert not (tmp_path / "snapshots.sqlite3").exists()
+    with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM video_snapshots").fetchone()[0] == 0
+        assert conn.execute("SELECT video_id, views FROM view_snapshots").fetchall() == [("vk:-12_34", 500)]
 
 
 def test_import_rejects_playlist_result(monkeypatch):

@@ -27,8 +27,8 @@ from app.models import (
 )
 from app.story import create_story
 from app.instagram_search import InstagramHashtagProvider
+from app.pipeline import rank
 from app.rutube import RutubeProvider
-from app.scoring import ranking_key
 from app.search_errors import ProviderUnavailableError
 from app.tiktok_search import TikTokResearchProvider
 from app.vk_search import VkProvider
@@ -94,7 +94,7 @@ async def search_videos(request: SearchRequest) -> SearchResponse:
     for _, candidates, _ in results:
         for video in candidates:
             unique[(video.platform, video.video_id)] = video
-    videos = sorted(unique.values(), key=ranking_key, reverse=True)[:request.limit]
+    videos = rank(unique.values(), request.limit)
     statuses = [result[2] for result in results]
     for status in statuses:
         status.returned = sum(video.platform == status.platform for video in videos)

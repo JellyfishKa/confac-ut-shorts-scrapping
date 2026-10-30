@@ -7,10 +7,8 @@ from datetime import datetime, timezone
 import yt_dlp
 from fastapi import HTTPException
 
-from app.config import settings
-from app.models import ImportRequest, ImportResponse, VideoCandidate
-from app.scoring import PublicStats, derive_stats
-from app.snapshots import SnapshotStore
+from app.models import ImportRequest, ImportResponse
+from app.pipeline import CandidateBuilder, RawVideo
 
 
 _VIDEO_PATHS = {
@@ -74,46 +72,13 @@ async def import_video(request: ImportRequest) -> ImportResponse:
     if not video_id:
         raise HTTPException(status_code=502, detail="Площадка не вернула идентификатор ролика.")
 
-    views = _count(info.get("view_count"))
-    likes = _count(info.get("like_count"))
-    comments = _count(info.get("comment_count"))
-    subscribers = _count(info.get("channel_follower_count"))
-    duration = _count(info.get("duration"))
     timestamp = info.get("timestamp") or info.get("release_timestamp")
     try:
         published_at = datetime.fromtimestamp(timestamp, timezone.utc) if isinstance(timestamp, (int, float)) else None
     except (OverflowError, OSError, ValueError):
         published_at = None
 
-    age_hours = None
-    views_per_hour = None
-    like_rate = None
-    comment_rate = None
-    popularity_score = None
-    if published_at:
-        age_hours = round(max((datetime.now(timezone.utc) - published_at).total_seconds() / 3600, 1), 2)
-    if views is not None:
-        if age_hours is not None:
-            views_per_hour = round(views / age_hours, 2)
-        if likes is not None:
-            like_rate = round(likes / max(views, 1), 6)
-        if comments is not None:
-            comment_rate = round(comments / max(views, 1), 6)
-    if None not in (views, likes, comments, published_at):
-        derived = derive_stats(PublicStats(views, likes, comments, published_at, duration or 0))
-        age_hours = derived.age_hours
-        views_per_hour = derived.views_per_hour
-        like_rate = derived.like_rate
-        comment_rate = derived.comment_rate
-        popularity_score = derived.popularity_score
-
-    growth = None
-    if None not in (views, likes, comments):
-        growth = SnapshotStore(settings.data_dir / "snapshots.sqlite3").observe(
-            f"{platform}:{video_id}", views=views, likes=likes, comments=comments
-        )
-
-    video = VideoCandidate(
+    video = CandidateBuilder().candidate(RawVideo(
         platform=platform,
         video_id=video_id,
         url=url,
@@ -123,20 +88,10 @@ async def import_video(request: ImportRequest) -> ImportResponse:
         channel_title=str(info.get("channel") or info.get("uploader") or ""),
         thumbnail_url=info.get("thumbnail"),
         published_at=published_at,
-        duration_seconds=duration,
-        views=views,
-        likes=likes,
-        comments=comments,
-        subscribers=subscribers,
-        age_hours=age_hours,
-        views_per_hour=views_per_hour,
-        like_rate=like_rate,
-        comment_rate=comment_rate,
-        breakout_ratio=round(views / subscribers, 4) if views is not None and subscribers else None,
-        previous_views=growth.previous_views if growth else None,
-        growth_views_per_hour=growth.growth_views_per_hour if growth else None,
-        growth_likes_per_hour=growth.growth_likes_per_hour if growth else None,
-        snapshot_age_minutes=growth.snapshot_age_minutes if growth else None,
-        popularity_score=popularity_score,
-    )
+        duration_seconds=_count(info.get("duration")),
+        views=_count(info.get("view_count")),
+        likes=_count(info.get("like_count")),
+        comments=_count(info.get("comment_count")),
+        subscribers=_count(info.get("channel_follower_count")),
+    ))
     return ImportResponse(video=video)

@@ -1,7 +1,6 @@
 import asyncio
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
 
@@ -41,17 +40,6 @@ class FakeClient:
     async def post(self, url, *, data):
         self.calls.append((url, data))
         return FakeResponse(self.payload)
-
-
-class FakeSnapshots:
-    def __init__(self, _):
-        pass
-
-    def observe(self, *_args, **_kwargs):
-        return SimpleNamespace(previous_views=None, growth_views_per_hour=None,
-                               growth_likes_per_hour=None, snapshot_age_minutes=None)
-
-    observe_views = observe
 
 
 def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch, tmp_path):
@@ -106,7 +94,6 @@ def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch, t
 
 
 def test_missing_likes_cannot_satisfy_positive_like_filter(monkeypatch):
-    monkeypatch.setattr("app.vk_search.SnapshotStore", FakeSnapshots)
     timestamp = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
     payload = {"response": {"count": 1, "items": [
         {"id": 1, "owner_id": 7, "type": "short_video", "duration": 30, "date": timestamp, "views": 10000}
@@ -165,7 +152,6 @@ def test_baseline_is_recorded_before_popularity_filters(monkeypatch):
 
 
 def test_vk_error_never_exposes_access_token(monkeypatch):
-    monkeypatch.setattr("app.vk_search.SnapshotStore", FakeSnapshots)
     payload = {"error": {"error_code": 15, "error_msg": "secret-token", "request_params": [
         {"key": "access_token", "value": "secret-token"}
     ]}}

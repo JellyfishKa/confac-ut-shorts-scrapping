@@ -167,6 +167,7 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
     assert video.views == 3000 and video.views_per_hour is not None
     assert video.likes is None and video.comments is None
     assert video.like_rate is None and video.comment_rate is None
+    assert video.popularity_score is not None
     assert video.previous_views is None and video.growth_views_per_hour is None
     with sqlite3.connect(tmp_path / "snapshots.sqlite3") as conn:
         assert conn.execute("SELECT COUNT(*) FROM video_snapshots").fetchone()[0] == 0

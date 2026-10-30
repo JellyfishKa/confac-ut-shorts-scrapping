@@ -12,9 +12,8 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
-from app.scoring import PublicStats, derive_stats, passes_filter, ranking_key
+from app.pipeline import CandidateBuilder, RawVideo, rank, resolve_filters
 from app.search_errors import ProviderUnavailableError
-from app.snapshots import SnapshotStore
 
 
 _API = "https://open.tiktokapis.com/v2"
@@ -59,11 +58,11 @@ class TikTokResearchProvider:
         return self.static_token
 
     async def search(self, request: SearchRequest) -> tuple[int, list[VideoCandidate]]:
-        max_age = request.max_age_hours if request.max_age_hours is not None else settings.default_max_age_hours
-        if max_age > 30 * 24:
+        filters = resolve_filters(request)
+        if filters.max_age_hours > 30 * 24:
             raise ProviderUnavailableError("TikTok Research API допускает окно запроса до 30 дней; уменьшите период до 720 часов.")
         now = datetime.now(timezone.utc)
-        start = now - timedelta(hours=max_age)
+        start = now - timedelta(hours=filters.max_age_hours)
         body = {
             "query": {"and": [{"operation": "EQ", "field_name": "keyword", "field_values": [request.query]}]},
             "start_date": start.strftime("%Y%m%d"),
@@ -101,56 +100,29 @@ class TikTokResearchProvider:
                     body["search_id"] = search_id
                 except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
                     raise RuntimeError("TikTok Research API отклонил поиск. Проверьте доступ research.data.basic или повторите позже.") from exc
-        candidates: list[VideoCandidate] = []
-        snapshots: SnapshotStore | None = None
+        parsed: list[RawVideo] = []
         for raw in raw_videos:
-            try:
-                video_id = str(raw["id"])
-                published = datetime.fromtimestamp(int(raw["create_time"]), timezone.utc)
-                public = PublicStats(
-                    views=max(int(raw["view_count"]), 0),
-                    likes=max(int(raw["like_count"]), 0),
-                    comments=max(int(raw["comment_count"]), 0),
-                    published_at=published,
-                    duration_seconds=max(int(raw["video_duration"]), 0),
-                )
-            except (KeyError, TypeError, ValueError, OverflowError, OSError):
-                continue
-            derived = derive_stats(public, now=now)
-            # Record the baseline before popularity filters, so a video that
-            # qualifies on a later search already has growth history.
-            if snapshots is None:
-                snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
-            growth = snapshots.observe(
-                f"tiktok:{video_id}", views=public.views,
-                likes=public.likes, comments=public.comments,
-            )
-            if not passes_filter(
-                public, derived, max_age_hours=max_age,
-                min_views=request.min_views if request.min_views is not None else settings.default_min_views,
-                min_views_per_hour=request.min_views_per_hour if request.min_views_per_hour is not None else settings.default_min_views_per_hour,
-                min_like_rate=request.min_like_rate if request.min_like_rate is not None else settings.default_min_like_rate,
-                max_duration_seconds=request.max_duration_seconds if request.max_duration_seconds is not None else settings.default_max_duration_seconds,
-            ):
-                continue
+            # Without a username there is no public URL for the video.
             username = str(raw.get("username") or "").lstrip("@")
             if not username:
                 continue
+            try:
+                video_id = str(raw["id"])
+                published = datetime.fromtimestamp(int(raw["create_time"]), timezone.utc)
+                views = max(int(raw["view_count"]), 0)
+                likes = max(int(raw["like_count"]), 0)
+                comments = max(int(raw["comment_count"]), 0)
+                duration = max(int(raw["video_duration"]), 0)
+            except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                continue
             description = str(raw.get("video_description") or "")
-            candidates.append(VideoCandidate(
+            parsed.append(RawVideo(
                 platform="tiktok", video_id=video_id,
                 url=f"https://www.tiktok.com/@{username}/video/{video_id}",
                 title=description[:120] or f"TikTok {video_id}", description=description,
-                channel_id=username, channel_title=username or "TikTok",
-                published_at=published, duration_seconds=public.duration_seconds,
-                views=public.views, likes=public.likes, comments=public.comments,
-                age_hours=derived.age_hours, views_per_hour=derived.views_per_hour,
-                like_rate=derived.like_rate, comment_rate=derived.comment_rate,
-                previous_views=growth.previous_views,
-                growth_views_per_hour=growth.growth_views_per_hour,
-                growth_likes_per_hour=growth.growth_likes_per_hour,
-                snapshot_age_minutes=growth.snapshot_age_minutes,
-                popularity_score=derived.popularity_score,
+                channel_id=username, channel_title=username,
+                published_at=published, duration_seconds=duration,
+                views=views, likes=likes, comments=comments,
             ))
-        candidates.sort(key=ranking_key, reverse=True)
-        return len(raw_videos), candidates[:request.limit]
+        candidates = CandidateBuilder(now=now).select(parsed, filters)
+        return len(raw_videos), rank(candidates, request.limit)

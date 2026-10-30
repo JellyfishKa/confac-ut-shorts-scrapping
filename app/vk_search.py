@@ -6,9 +6,8 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
-from app.scoring import PublicStats, derive_stats, ranking_key
+from app.pipeline import CandidateBuilder, RawVideo, rank, resolve_filters
 from app.search_errors import ProviderUnavailableError
-from app.snapshots import SnapshotStore
 
 
 VK_SEARCH_API = "https://api.vk.com/method/video.search"
@@ -54,14 +53,9 @@ class VkProvider:
             raise ProviderUnavailableError("VK_ACCESS_TOKEN не задан. Добавьте бесплатный токен VK API в .env.")
 
     async def search(self, request: SearchRequest) -> tuple[int, list[VideoCandidate]]:
-        max_age = request.max_age_hours if request.max_age_hours is not None else settings.default_max_age_hours
-        min_views = request.min_views if request.min_views is not None else settings.default_min_views
-        min_views_per_hour = request.min_views_per_hour if request.min_views_per_hour is not None else settings.default_min_views_per_hour
-        min_like_rate = request.min_like_rate if request.min_like_rate is not None else settings.default_min_like_rate
-        max_duration = request.max_duration_seconds if request.max_duration_seconds is not None else settings.default_max_duration_seconds
+        filters = resolve_filters(request)
         page_size = min(max(settings.max_results, request.limit), 100)
-        snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
-        now = datetime.now(timezone.utc)
+        builder = CandidateBuilder()
         candidates: list[VideoCandidate] = []
         seen: set[str] = set()
         found = 0
@@ -76,7 +70,7 @@ class VkProvider:
                         "count": page_size,
                         "offset": page * page_size,
                         "sort": 0,  # newest first; rank by public view velocity below
-                        "shorter": max_duration,
+                        "shorter": filters.max_duration_seconds,
                         "filters": "short",
                         "extended": 1,
                     })
@@ -102,6 +96,7 @@ class VkProvider:
 
                 authors = _authors(result)
                 items = result["items"]
+                raw_videos: list[RawVideo] = []
                 for item in items:
                     if not isinstance(item, dict) or item.get("type") != "short_video":
                         continue
@@ -118,34 +113,14 @@ class VkProvider:
                     duration = _nonnegative_int(item.get("duration"))
                     views = _nonnegative_int(item.get("views"))
                     timestamp = _nonnegative_int(item.get("date"))
-                    if not duration or duration > max_duration or views is None or timestamp is None:
+                    if not duration or views is None or timestamp is None:
                         continue
                     try:
                         published_at = datetime.fromtimestamp(timestamp, timezone.utc)
                     except (OverflowError, OSError, ValueError):
                         continue
                     raw_likes = item.get("likes")
-                    likes = _nonnegative_int(raw_likes.get("count")) if isinstance(raw_likes, dict) else None
-                    comments = _nonnegative_int(item.get("comments"))
-                    # Record the baseline before popularity filters, so a clip that
-                    # qualifies on a later search already has growth history.
-                    if likes is not None and comments is not None:
-                        growth = snapshots.observe(f"vk:{video_id}", views=views, likes=likes, comments=comments)
-                    else:
-                        growth = snapshots.observe_views(f"vk:{video_id}", views=views)
-
-                    age_hours = max((now - published_at).total_seconds() / 3600, 1.0)
-                    views_per_hour = views / age_hours
-                    if age_hours > max_age or views < min_views or views_per_hour < min_views_per_hour:
-                        continue
-                    if min_like_rate > 0 and (likes is None or likes / max(views, 1) < min_like_rate):
-                        continue
-                    popularity_score = None
-                    if likes is not None and comments is not None:
-                        popularity_score = derive_stats(
-                            PublicStats(views, likes, comments, published_at, duration), now=now
-                        ).popularity_score
-                    candidates.append(VideoCandidate(
+                    raw_videos.append(RawVideo(
                         platform="vk",
                         video_id=video_id,
                         url=f"https://vk.com/clip{video_id}",
@@ -157,21 +132,12 @@ class VkProvider:
                         published_at=published_at,
                         duration_seconds=duration,
                         views=views,
-                        likes=likes,
-                        comments=comments,
-                        age_hours=round(age_hours, 2),
-                        views_per_hour=round(views_per_hour, 2),
-                        like_rate=round(likes / max(views, 1), 6) if likes is not None else None,
-                        comment_rate=round(comments / max(views, 1), 6) if comments is not None else None,
-                        previous_views=growth.previous_views,
-                        growth_views_per_hour=growth.growth_views_per_hour,
-                        growth_likes_per_hour=growth.growth_likes_per_hour,
-                        snapshot_age_minutes=growth.snapshot_age_minutes,
-                        popularity_score=popularity_score,
+                        likes=_nonnegative_int(raw_likes.get("count")) if isinstance(raw_likes, dict) else None,
+                        comments=_nonnegative_int(item.get("comments")),
                     ))
+                candidates.extend(builder.select(raw_videos, filters))
 
                 if len(candidates) >= request.limit or len(items) < page_size:
                     break
 
-        candidates.sort(key=ranking_key, reverse=True)
-        return found, candidates[:request.limit]
+        return found, rank(candidates, request.limit)

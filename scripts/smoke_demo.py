@@ -24,12 +24,19 @@ response.raise_for_status()
 data = response.json()
 
 print(f"\nchecked={data['found']} returned={data['returned']}\n")
+
+
+def shown(value, template):
+    # Metrics a platform did not report stay null in the API response.
+    return "—" if value is None else template.format(value)
+
+
 for i, video in enumerate(data["videos"], 1):
     print(
-        f"{i:>2}. score={video['popularity_score']:.3f} "
-        f"v/h={video['views_per_hour']:.0f} "
+        f"{i:>2}. score={shown(video['popularity_score'], '{:.3f}')} "
+        f"v/h={shown(video['views_per_hour'], '{:.0f}')} "
         f"growth={video['growth_views_per_hour']} "
-        f"like={video['like_rate'] * 100:.2f}% "
+        f"like={shown(video['like_rate'], '{:.2%}')} "
         f"| {video['title']}"
     )
 

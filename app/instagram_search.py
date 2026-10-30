@@ -12,6 +12,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
+from app.pipeline import CandidateBuilder, RawVideo, resolve_filters
 from app.search_errors import ProviderUnavailableError
 
 
@@ -71,9 +72,11 @@ class InstagramHashtagProvider:
                         break
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 raise RuntimeError("Instagram Graph API отклонил поиск. Проверьте токен, профессиональный аккаунт и доступ к публичным хештегам.") from exc
-        now = datetime.now(timezone.utc)
-        max_age = request.max_age_hours if request.max_age_hours is not None else settings.default_max_age_hours
-        candidates: list[VideoCandidate] = []
+        filters = resolve_filters(request)
+        # Explicit metric filters were rejected above; defaults cannot apply to
+        # metrics that hashtag search never reports.
+        filters.min_views = filters.min_views_per_hour = filters.min_like_rate = 0
+        reels: list[RawVideo] = []
         for raw in raw_media:
             # VIDEO includes feed videos: a /reel/ permalink is required.
             permalink = str(raw.get("permalink") or "")
@@ -88,19 +91,15 @@ class InstagramHashtagProvider:
                 video_id = str(raw["id"])
             except (KeyError, ValueError, TypeError):
                 continue
-            age_hours = max((now - published).total_seconds() / 3600, 1)
-            if age_hours > max_age:
-                continue
             caption = str(raw.get("caption") or "")
-            candidates.append(VideoCandidate(
+            reels.append(RawVideo(
                 platform="instagram", video_id=video_id,
                 url=f"https://www.instagram.com{parts.path}",
                 title=caption[:120] or f"Instagram Reel {video_id}", description=caption,
                 channel_title="Instagram", thumbnail_url=raw.get("thumbnail_url"),
-                published_at=published, duration_seconds=None,
-                views=None, likes=None, comments=None,
-                age_hours=round(age_hours, 2), views_per_hour=None,
-                like_rate=None, comment_rate=None, popularity_score=None,
+                published_at=published, duration_seconds=None, views=None,
             ))
-        candidates.sort(key=lambda video: video.published_at or now, reverse=True)
+        candidates = CandidateBuilder().select(reels, filters)
+        # Without metrics, the newest reels come first.
+        candidates.sort(key=lambda video: video.published_at, reverse=True)
         return len(raw_media), candidates[:request.limit]
