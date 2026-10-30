@@ -19,6 +19,7 @@ _VIDEO_PATHS = {
     "instagram": re.compile(r"/reel/[A-Za-z0-9_-]+/?"),
     "rutube": re.compile(r"/(?:video|shorts)/[A-Za-z0-9_-]+/?"),
 }
+YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 _HOSTS = {
     "vk.com": "vk", "www.vk.com": "vk", "m.vk.com": "vk",
     "tiktok.com": "tiktok", "www.tiktok.com": "tiktok",

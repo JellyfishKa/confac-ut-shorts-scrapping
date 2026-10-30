@@ -115,6 +115,7 @@ def test_vk_and_tiktok_missing_credentials_are_individually_reported(monkeypatch
 
 def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
     published = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
     short = {
         "id": "a" * 32, "title": "Short clip", "duration": 30,
@@ -183,6 +184,28 @@ def test_rutube_search_filters_short_videos_and_keeps_missing_metrics_null(monke
     request.min_like_rate = 0.01
     _, videos = asyncio.run(RutubeProvider().search(request))
     assert videos == []
+
+
+def test_merged_ranking_uses_measured_growth_instead_of_lifetime_speed(monkeypatch):
+    stalled = candidate("youtube", "stalled", speed=100_000)
+    stalled.growth_views_per_hour = -5
+    accelerating = candidate("rutube", "accelerating", speed=10)
+    accelerating.growth_views_per_hour = 5_000
+    fresh = candidate("rutube", "fresh", speed=1_000)
+
+    class YouTube:
+        async def search(self, request):
+            return 1, [stalled]
+
+    class Rutube:
+        async def search(self, request):
+            return 2, [accelerating, fresh]
+
+    monkeypatch.setattr("app.main.YouTubeProvider", YouTube)
+    monkeypatch.setattr("app.main.RutubeProvider", Rutube)
+    result = asyncio.run(search_videos(SearchRequest(query="cats", platforms=["youtube", "rutube"])))
+    # A second snapshot alone must not outrank faster videos: the stalled clip goes last.
+    assert [video.video_id for video in result.videos] == ["accelerating", "fresh", "stalled"]
 
 
 @pytest.mark.parametrize("platforms", [[], ["unsupported"]])

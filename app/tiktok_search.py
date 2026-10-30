@@ -12,7 +12,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
-from app.scoring import PublicStats, derive_stats, passes_filter
+from app.scoring import PublicStats, derive_stats, passes_filter, ranking_key
 from app.search_errors import ProviderUnavailableError
 from app.snapshots import SnapshotStore
 
@@ -117,6 +117,14 @@ class TikTokResearchProvider:
             except (KeyError, TypeError, ValueError, OverflowError, OSError):
                 continue
             derived = derive_stats(public, now=now)
+            # Record the baseline before popularity filters, so a video that
+            # qualifies on a later search already has growth history.
+            if snapshots is None:
+                snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
+            growth = snapshots.observe(
+                f"tiktok:{video_id}", views=public.views,
+                likes=public.likes, comments=public.comments,
+            )
             if not passes_filter(
                 public, derived, max_age_hours=max_age,
                 min_views=request.min_views if request.min_views is not None else settings.default_min_views,
@@ -129,12 +137,6 @@ class TikTokResearchProvider:
             if not username:
                 continue
             description = str(raw.get("video_description") or "")
-            if snapshots is None:
-                snapshots = SnapshotStore(settings.data_dir / "snapshots.sqlite3")
-            growth = snapshots.observe(
-                f"tiktok:{video_id}", views=public.views,
-                likes=public.likes, comments=public.comments,
-            )
             candidates.append(VideoCandidate(
                 platform="tiktok", video_id=video_id,
                 url=f"https://www.tiktok.com/@{username}/video/{video_id}",
@@ -150,9 +152,5 @@ class TikTokResearchProvider:
                 snapshot_age_minutes=growth.snapshot_age_minutes,
                 popularity_score=derived.popularity_score,
             ))
-        candidates.sort(key=lambda video: (
-            video.growth_views_per_hour is not None,
-            video.growth_views_per_hour or 0,
-            video.popularity_score or 0,
-        ), reverse=True)
+        candidates.sort(key=ranking_key, reverse=True)
         return len(raw_videos), candidates[:request.limit]

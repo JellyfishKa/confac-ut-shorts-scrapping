@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from math import log1p
 
 from app.config import settings
+from app.models import VideoCandidate
 
 
 @dataclass(slots=True)
@@ -62,6 +63,12 @@ def derive_stats(stats: PublicStats, now: datetime | None = None) -> DerivedStat
         comment_rate=round(comment_rate, 6),
         popularity_score=round(score, 6),
     )
+
+
+def ranking_key(video: VideoCandidate) -> tuple[float, float]:
+    """Rank by the best estimate of current speed: measured growth, else lifetime views/h."""
+    speed = video.growth_views_per_hour if video.growth_views_per_hour is not None else video.views_per_hour
+    return speed or 0, video.popularity_score or 0
 
 
 def passes_filter(

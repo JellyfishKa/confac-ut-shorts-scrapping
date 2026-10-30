@@ -61,6 +61,7 @@ def test_tiktok_client_token_and_keyword_search(monkeypatch, tmp_path):
 
 def test_tiktok_repeated_search_tracks_views_and_likes(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
     now = int(datetime.now(timezone.utc).timestamp()) - 3600
     counts = [(10000, 1000), (10200, 1040)]
 
@@ -81,6 +82,28 @@ def test_tiktok_repeated_search_tracks_views_and_likes(monkeypatch, tmp_path):
     assert second[0].previous_views == 10000
     assert second[0].growth_views_per_hour is not None and second[0].growth_views_per_hour > 0
     assert second[0].growth_likes_per_hour is not None and second[0].growth_likes_per_hour > 0
+
+
+def test_tiktok_baseline_is_recorded_before_popularity_filters(monkeypatch):
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
+    created = int(datetime.now(timezone.utc).timestamp()) - 3600
+    counts = [(500, 50), (1500, 120)]
+
+    def handler(request):
+        views, likes = counts.pop(0)
+        return httpx.Response(200, json={"error": {"code": "ok"}, "data": {"videos": [{
+            "id": 789, "username": "chef", "video_description": "Soup",
+            "create_time": created, "video_duration": 20,
+            "view_count": views, "like_count": likes, "comment_count": 10,
+        }]}})
+
+    _mock_client(monkeypatch, "app.tiktok_search", handler)
+    provider = TikTokResearchProvider(client_key="", client_secret="", token="secret")
+    request = SearchRequest(query="soup", platforms=["tiktok"], min_views=1000)
+    _, first = asyncio.run(provider.search(request))
+    _, second = asyncio.run(provider.search(request))
+    assert first == []
+    assert second[0].previous_views == 500
 
 
 def test_tiktok_api_error_is_not_empty_success(monkeypatch):

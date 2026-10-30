@@ -51,9 +51,12 @@ class FakeSnapshots:
         return SimpleNamespace(previous_views=None, growth_views_per_hour=None,
                                growth_likes_per_hour=None, snapshot_age_minutes=None)
 
+    observe_views = observe
+
 
 def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
     now = datetime.now(timezone.utc)
     recent = int((now - timedelta(hours=4)).timestamp())
     old = int((now - timedelta(days=20)).timestamp())
@@ -88,6 +91,7 @@ def test_search_only_returns_recent_vk_clips_with_available_stats(monkeypatch, t
     assert video.views == 12000 and video.likes == 600 and video.comments == 30
     assert video.views_per_hour is not None and video.views_per_hour > 0
     assert video.like_rate == 0.05
+    assert video.popularity_score is not None
     assert calls[0][0] == VK_SEARCH_API
     assert calls[0][1]["q"] == "котики"
     assert calls[0][1]["shorter"] == 90
@@ -118,6 +122,7 @@ def test_missing_likes_cannot_satisfy_positive_like_filter(monkeypatch):
 
 def test_missing_comments_use_view_only_snapshot(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
     timestamp = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
     payload = {"response": {"count": 1, "items": [
         {"id": 1, "owner_id": 7, "type": "short_video", "duration": 30,
@@ -139,6 +144,24 @@ def test_missing_comments_use_view_only_snapshot(monkeypatch, tmp_path):
     assert repeated[0].previous_views == 10000
     assert repeated[0].growth_views_per_hour is not None and repeated[0].growth_views_per_hour > 0
     assert repeated[0].growth_likes_per_hour is None
+
+
+def test_baseline_is_recorded_before_popularity_filters(monkeypatch):
+    monkeypatch.setattr(settings, "growth_min_interval_minutes", 0)
+    timestamp = int((datetime.now(timezone.utc) - timedelta(hours=1)).timestamp())
+    payload = {"response": {"count": 1, "items": [
+        {"id": 1, "owner_id": 7, "type": "short_video", "duration": 30, "date": timestamp,
+         "views": 500, "likes": {"count": 50}, "comments": 5}
+    ]}}
+    monkeypatch.setattr("app.vk_search.httpx.AsyncClient", lambda **_: FakeClient(payload, []))
+    request = SearchRequest(query="котики", min_views=1000)
+
+    _, first = asyncio.run(VkProvider(access_token="test").search(request))
+    assert first == []
+    payload["response"]["items"][0].update(views=1500, likes={"count": 120}, comments=9)
+    _, second = asyncio.run(VkProvider(access_token="test").search(request))
+    assert second[0].previous_views == 500
+    assert second[0].growth_views_per_hour is not None and second[0].growth_views_per_hour > 0
 
 
 def test_vk_error_never_exposes_access_token(monkeypatch):

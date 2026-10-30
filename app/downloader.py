@@ -1,23 +1,36 @@
+import sqlite3
+from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
-from threading import Lock
 
 from yt_dlp import YoutubeDL
 
 from app.config import settings
 
 
-_downloaded_paths: dict[str, Path] = {}
-_downloaded_lock = Lock()
+def _registry() -> sqlite3.Connection:
+    # Persisted so a server restart does not forget which URL each local MP4 belongs to.
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(settings.data_dir / "downloads.sqlite3")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS downloads ("
+        "url TEXT PRIMARY KEY, path TEXT NOT NULL, downloaded_at TEXT NOT NULL)"
+    )
+    return conn
 
 
 def remember_download(url: str, path: str) -> None:
-    with _downloaded_lock:
-        _downloaded_paths[url] = Path(path).resolve()
+    with closing(_registry()) as conn, conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO downloads(url, path, downloaded_at) VALUES (?, ?, ?)",
+            (url, str(Path(path).resolve()), datetime.now(timezone.utc).isoformat()),
+        )
 
 
 def was_downloaded_for(url: str, path: Path) -> bool:
-    with _downloaded_lock:
-        return _downloaded_paths.get(url) == path
+    with closing(_registry()) as conn:
+        row = conn.execute("SELECT path FROM downloads WHERE url = ?", (url,)).fetchone()
+    return row is not None and Path(row[0]) == path
 
 
 class VideoDownloader:

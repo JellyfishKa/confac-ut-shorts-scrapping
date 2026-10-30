@@ -4,13 +4,13 @@ from pathlib import Path
 import httpx
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.comfy import build_comfy_manifest
 from app.config import settings
 from app.downloader import VideoDownloader, remember_download
-from app.import_video import import_video
+from app.import_video import YOUTUBE_HOSTS, _validated_video_url, import_video
 from app.models import (
     ComfyManifestRequest,
     ComfyManifestResponse,
@@ -28,6 +28,7 @@ from app.models import (
 from app.story import create_story
 from app.instagram_search import InstagramHashtagProvider
 from app.rutube import RutubeProvider
+from app.scoring import ranking_key
 from app.search_errors import ProviderUnavailableError
 from app.tiktok_search import TikTokResearchProvider
 from app.vk_search import VkProvider
@@ -50,6 +51,7 @@ def health() -> dict:
         "status": "ok",
         "youtube_api_key_configured": bool(settings.youtube_api_key),
         "snapshot_db": str(settings.data_dir / "snapshots.sqlite3"),
+        "growth_min_interval_minutes": settings.growth_min_interval_minutes,
         "mode": "live" if settings.youtube_api_key else "needs_api_key",
     }
 
@@ -92,16 +94,7 @@ async def search_videos(request: SearchRequest) -> SearchResponse:
     for _, candidates, _ in results:
         for video in candidates:
             unique[(video.platform, video.video_id)] = video
-    videos = sorted(
-        unique.values(),
-        key=lambda video: (
-            video.growth_views_per_hour is not None,
-            video.growth_views_per_hour or 0,
-            video.views_per_hour or 0,
-            video.popularity_score or 0,
-        ),
-        reverse=True,
-    )[:request.limit]
+    videos = sorted(unique.values(), key=ranking_key, reverse=True)[:request.limit]
     statuses = [result[2] for result in results]
     for status in statuses:
         status.returned = sum(video.platform == status.platform for video in videos)
@@ -133,10 +126,13 @@ async def import_video_url(request: ImportRequest) -> ImportResponse:
 
 
 @app.post("/api/download", response_model=DownloadResponse)
-def download_video(request: DownloadRequest) -> DownloadResponse:
+def download_video(request: DownloadRequest) -> DownloadResponse | JSONResponse:
+    if request.url.host not in YOUTUBE_HOSTS:
+        _validated_video_url(ImportRequest(url=request.url))
     try:
         video_id, path = VideoDownloader().download(str(request.url))
         remember_download(str(request.url), path)
         return DownloadResponse(status="completed", video_id=video_id, path=path)
     except Exception as exc:
-        return DownloadResponse(status="failed", error=str(exc))
+        failed = DownloadResponse(status="failed", error=str(exc))
+        return JSONResponse(status_code=502, content=failed.model_dump())

@@ -58,7 +58,7 @@
       <button class="secondary" onclick="exportJSON()" id="jsonBtn" disabled>JSON</button>
     </div>
     <p class="small muted">Для Instagram укажите один хештег в поле «Тема». Если площадка требует доступ или ограничивает поиск, причина появится после запроса. Ссылку на отдельный ролик можно добавить ниже.</p>
-    <p id="status" class="muted small">Первый поиск создаёт snapshot. Повторный запрос позже позволит рассчитать фактический Δ views/hour.</p>
+    <p id="status" class="muted small">Первый поиск создаёт snapshot. Повторный запрос не раньше чем через <span class="growthInterval">30</span> мин позволит рассчитать фактический Δ views/hour.</p>
     <div id="platformStatuses" class="platform-statuses" role="status"></div>
   </div>
 
@@ -112,7 +112,7 @@
   </div>
 </div>
 <script>
-let currentVideos=[]; let searchResults=[]; let importedVideos=[]; let downloads=0; let currentStory=null; let storyRequestId=0;
+let currentVideos=[]; let searchResults=[]; let importedVideos=[]; let downloads=0; let currentStory=null; let storyRequestId=0; let growthMinutes=30;
 const $=id=>document.getElementById(id);
 function fmt(n){if(n===null||n===undefined)return '—';return new Intl.NumberFormat('ru-RU',{notation:'compact',maximumFractionDigits:1}).format(n)}
 function pct(n){return n==null?'—':(n*100).toFixed(2)+'%'}
@@ -135,7 +135,9 @@ function apiError(detail){
   return detail.map(e=>`${names[e.loc?.at(-1)]||e.loc?.at(-1)||'Поле'}: ${e.msg||'неверное значение'}`).join('; ');
 }
 async function health(){
-  try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube подключён · Rutube без ключа'}else{el.querySelector('.dot').style.background='#fde68a';el.querySelector('span:last-child').textContent='Rutube без ключа · YouTube нужен ключ'}}
+  try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');
+    if(d.growth_min_interval_minutes!=null){growthMinutes=d.growth_min_interval_minutes;document.querySelectorAll('.growthInterval').forEach(n=>n.textContent=growthMinutes)}
+    if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube подключён · Rutube без ключа'}else{el.querySelector('.dot').style.background='#fde68a';el.querySelector('span:last-child').textContent='Rutube без ключа · YouTube нужен ключ'}}
   catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
 }
 async function searchVideos(){
@@ -156,7 +158,7 @@ async function searchVideos(){
     const anySucceeded=(d.platform_statuses||[]).some(item=>item.status==='ok');
     $('status').className=anySucceeded?'muted small':'warn small';
     $('status').textContent=anySucceeded
-      ? `Готово: ${searchResults.length} кандидатов. MP4 не скачивались. ${searchResults.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':'Для расчёта фактической динамики выполните повторный поиск позже.'}`
+      ? `Готово: ${searchResults.length} кандидатов. MP4 не скачивались. ${searchResults.some(v=>v.growth_views_per_hour!=null)?'Доступны повторные snapshots.':`Для расчёта фактической динамики повторите поиск не раньше чем через ${growthMinutes} мин.`}`
       : 'Ни одна выбранная площадка не выполнила поиск. Причины указаны ниже.';
     refreshVideos();
   }catch(e){$('status').className='err small';$('status').textContent=e.message}

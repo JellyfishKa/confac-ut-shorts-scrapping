@@ -5,7 +5,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
-from app.scoring import PublicStats, derive_stats, passes_filter
+from app.scoring import PublicStats, derive_stats, passes_filter, ranking_key
 from app.search_errors import ProviderUnavailableError
 from app.snapshots import SnapshotStore
 
@@ -160,12 +160,5 @@ class YouTubeProvider:
                 popularity_score=derived.popularity_score,
             ))
 
-        candidates.sort(
-            key=lambda video: (
-                video.growth_views_per_hour is not None,
-                video.growth_views_per_hour or 0,
-                video.popularity_score,
-            ),
-            reverse=True,
-        )
+        candidates.sort(key=ranking_key, reverse=True)
         return len(raw_videos), candidates[: request.limit]

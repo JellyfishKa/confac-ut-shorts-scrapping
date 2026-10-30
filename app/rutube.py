@@ -7,6 +7,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
+from app.scoring import ranking_key
 from app.snapshots import SnapshotStore
 
 
@@ -141,5 +142,5 @@ class RutubeProvider:
                     break
                 next_url = _next_page(payload.get("next"))
 
-        candidates.sort(key=lambda video: video.views_per_hour or 0, reverse=True)
+        candidates.sort(key=ranking_key, reverse=True)
         return found, candidates[:request.limit]

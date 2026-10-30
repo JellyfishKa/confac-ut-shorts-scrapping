@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app.config import settings
 
 
 @dataclass(slots=True)
@@ -22,6 +24,11 @@ class SnapshotStore:
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
+
+    @staticmethod
+    def _baseline_cutoff(now: datetime) -> str:
+        # Stored timestamps are UTC ISO strings, so string comparison follows time order.
+        return (now - timedelta(minutes=settings.growth_min_interval_minutes)).isoformat()
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -65,18 +72,18 @@ class SnapshotStore:
     ) -> GrowthStats:
         """Track view growth when a platform does not publish likes/comments."""
         now = captured_at or datetime.now(timezone.utc)
-        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        now = (now if now.tzinfo else now.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
         with self._connect() as conn:
             previous = conn.execute(
                 """
                 SELECT captured_at, views
                 FROM view_snapshots
-                WHERE video_id = ?
+                WHERE video_id = ? AND captured_at <= ?
                 ORDER BY captured_at DESC
                 LIMIT 1
                 """,
-                (video_id,),
+                (video_id, self._baseline_cutoff(now)),
             ).fetchone()
             conn.execute(
                 "INSERT INTO view_snapshots(video_id, captured_at, views) VALUES (?, ?, ?)",
@@ -106,18 +113,18 @@ class SnapshotStore:
         captured_at: datetime | None = None,
     ) -> GrowthStats:
         now = captured_at or datetime.now(timezone.utc)
-        now = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        now = (now if now.tzinfo else now.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
         with self._connect() as conn:
             previous = conn.execute(
                 """
                 SELECT captured_at, views, likes
                 FROM video_snapshots
-                WHERE video_id = ?
+                WHERE video_id = ? AND captured_at <= ?
                 ORDER BY captured_at DESC
                 LIMIT 1
                 """,
-                (video_id,),
+                (video_id, self._baseline_cutoff(now)),
             ).fetchone()
 
             conn.execute(

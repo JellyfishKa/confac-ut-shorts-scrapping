@@ -1,4 +1,5 @@
 import base64
+import importlib
 import json
 import subprocess
 
@@ -183,6 +184,38 @@ def test_download_endpoint_binds_video_url_to_saved_file(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.json()["path"] == str(video)
     assert was_downloaded_for(url, video)
+
+
+def test_download_registry_survives_server_restart(tmp_path):
+    video = tmp_path / "abc.mp4"
+    video.write_bytes(b"video")
+    remember_download("https://rutube.ru/video/abc/", str(video))
+
+    import app.downloader
+    restarted = importlib.reload(app.downloader)
+    assert restarted.was_downloaded_for("https://rutube.ru/video/abc/", video.resolve())
+    assert not restarted.was_downloaded_for("https://rutube.ru/video/other/", video.resolve())
+
+
+def test_download_rejects_unsupported_host(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.main.VideoDownloader.download", lambda self, url: calls.append(url))
+    response = TestClient(app).post("/api/download", json={"url": "https://example.com/video.mp4"})
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_download_failure_returns_http_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "download_dir", tmp_path)
+
+    def fail(self, url):
+        raise RuntimeError("Video unavailable")
+
+    monkeypatch.setattr("app.main.VideoDownloader.download", fail)
+    response = TestClient(app).post("/api/download", json={"url": "https://www.youtube.com/shorts/abc123"})
+    assert response.status_code == 502
+    assert response.json()["status"] == "failed"
+    assert "Video unavailable" in response.json()["error"]
 
 
 @pytest.mark.parametrize("size,duration,expected", [(5, "181\n", "180 секунд"), (5, "n/a", "проверить"), (0, "30\n", "14 МБ")])

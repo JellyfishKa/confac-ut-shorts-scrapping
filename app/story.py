@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.downloader import was_downloaded_for
-from app.import_video import _validated_video_url
+from app.import_video import YOUTUBE_HOSTS, _validated_video_url
 from app.models import ImportRequest, StoryRequest, StoryResponse
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/interactions"
@@ -76,7 +76,7 @@ def _upstream_error(status_code: int) -> HTTPException:
 
 
 async def create_story(request: StoryRequest) -> StoryResponse:
-    is_youtube = request.url.host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+    is_youtube = request.url.host in YOUTUBE_HOSTS
     if not is_youtube:
         _validated_video_url(ImportRequest(url=request.url))
     if not settings.gemini_api_key:

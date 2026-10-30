@@ -6,6 +6,7 @@ import httpx
 
 from app.config import settings
 from app.models import SearchRequest, VideoCandidate
+from app.scoring import PublicStats, derive_stats, ranking_key
 from app.search_errors import ProviderUnavailableError
 from app.snapshots import SnapshotStore
 
@@ -123,20 +124,27 @@ class VkProvider:
                         published_at = datetime.fromtimestamp(timestamp, timezone.utc)
                     except (OverflowError, OSError, ValueError):
                         continue
-                    age_hours = max((now - published_at).total_seconds() / 3600, 1.0)
-                    views_per_hour = views / age_hours
-                    if age_hours > max_age or views < min_views or views_per_hour < min_views_per_hour:
-                        continue
-
                     raw_likes = item.get("likes")
                     likes = _nonnegative_int(raw_likes.get("count")) if isinstance(raw_likes, dict) else None
-                    if min_like_rate > 0 and (likes is None or likes / max(views, 1) < min_like_rate):
-                        continue
                     comments = _nonnegative_int(item.get("comments"))
+                    # Record the baseline before popularity filters, so a clip that
+                    # qualifies on a later search already has growth history.
                     if likes is not None and comments is not None:
                         growth = snapshots.observe(f"vk:{video_id}", views=views, likes=likes, comments=comments)
                     else:
                         growth = snapshots.observe_views(f"vk:{video_id}", views=views)
+
+                    age_hours = max((now - published_at).total_seconds() / 3600, 1.0)
+                    views_per_hour = views / age_hours
+                    if age_hours > max_age or views < min_views or views_per_hour < min_views_per_hour:
+                        continue
+                    if min_like_rate > 0 and (likes is None or likes / max(views, 1) < min_like_rate):
+                        continue
+                    popularity_score = None
+                    if likes is not None and comments is not None:
+                        popularity_score = derive_stats(
+                            PublicStats(views, likes, comments, published_at, duration), now=now
+                        ).popularity_score
                     candidates.append(VideoCandidate(
                         platform="vk",
                         video_id=video_id,
@@ -159,11 +167,11 @@ class VkProvider:
                         growth_views_per_hour=growth.growth_views_per_hour,
                         growth_likes_per_hour=growth.growth_likes_per_hour,
                         snapshot_age_minutes=growth.snapshot_age_minutes,
-                        popularity_score=None,
+                        popularity_score=popularity_score,
                     ))
 
                 if len(candidates) >= request.limit or len(items) < page_size:
                     break
 
-        candidates.sort(key=lambda video: (video.growth_views_per_hour is not None, video.growth_views_per_hour or 0, video.views_per_hour or 0), reverse=True)
+        candidates.sort(key=ranking_key, reverse=True)
         return found, candidates[:request.limit]
