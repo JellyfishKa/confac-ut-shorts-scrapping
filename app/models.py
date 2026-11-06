@@ -122,6 +122,7 @@ class TrackedVideo(BaseModel):
 class TrackedResponse(BaseModel):
     interval_minutes: float
     tracked_hours: float
+    total: int
     videos: list[TrackedVideo]
 
 

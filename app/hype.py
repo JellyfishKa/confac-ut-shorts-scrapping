@@ -57,7 +57,7 @@ def pick_hype(tracked: list[TrackedVideo], limit: int, platform: str | None = No
     """With a platform, videos are ranked against that platform's videos only."""
     pool = [
         item for item in tracked
-        if _is_candidate(item) and (platform is None or item.video.platform == platform)
+        if is_hot(item) and (platform is None or item.video.platform == platform)
     ]
     accelerations = {id(item): acceleration(item.history) for item in pool}
     signals: dict[str, Callable[[TrackedVideo], float | None]] = {
@@ -93,11 +93,18 @@ def _speed(item: TrackedVideo) -> float | None:
     return video.growth_views_per_hour if video.growth_views_per_hour is not None else video.views_per_hour
 
 
-def _is_candidate(item: TrackedVideo) -> bool:
-    """Junk filter: too few views, or not gaining views right now."""
+def is_hot(item: TrackedVideo) -> bool:
+    """Recent, already popular and still rising; a video not yet re-measured gets the benefit of the doubt."""
+    video = item.video
     speed = _speed(item)
-    views = item.video.views
-    return views is not None and views >= settings.hype_min_views and speed is not None and speed > 0
+    if video.views is None or video.views < settings.hype_min_views:
+        return False
+    if speed is None or speed <= 0 or speed < settings.hype_min_speed:
+        return False
+    if video.age_hours is not None and video.age_hours > settings.hype_max_age_hours:
+        return False
+    growth, lifetime = video.growth_views_per_hour, video.views_per_hour
+    return growth is None or not lifetime or growth >= settings.hype_min_growth_share * lifetime
 
 
 def _ranks(pool: list[TrackedVideo], signal: Callable[[TrackedVideo], float | None]) -> dict[int, float]:

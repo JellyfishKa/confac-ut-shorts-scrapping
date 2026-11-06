@@ -75,7 +75,7 @@ def test_run_searches_every_marker_within_the_daily_youtube_budget(queries, monk
     ]
     first = search.requests[0]
     assert first.max_age_hours == settings.discovery_max_age_hours
-    assert first.min_views == settings.hype_min_views and first.limit == 50
+    assert first.min_views == settings.discovery_min_views and first.limit == 50
     assert run.queries == 3 and run.youtube_units == 204
 
     # 46 units are left today, so the next run skips YouTube; the budget starts over the next day.

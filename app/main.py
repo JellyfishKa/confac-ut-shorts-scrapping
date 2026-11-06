@@ -44,7 +44,7 @@ from app.discovery import is_running as discovery_running
 from app.discovery import run_forever as discover_forever
 from app.discovery import run_once as run_discovery_once
 from app.discovery import status as discovery_status
-from app.hype import AI_CHECK_POOL, pick_hype
+from app.hype import AI_CHECK_POOL, is_hot, pick_hype
 from app.transcribe import create_transcript, save_srt
 from app.instagram_search import InstagramHashtagProvider
 from app.pipeline import rank
@@ -211,11 +211,14 @@ async def hype(
 
 
 @app.get("/api/tracked", response_model=TrackedResponse)
-def tracked_videos() -> TrackedResponse:
+def tracked_videos(hot_only: bool = False) -> TrackedResponse:
+    """With `hot_only`, the list keeps pinned videos and those passing the hype filter; all stay tracked."""
+    videos = TrackedStore().active()
     return TrackedResponse(
         interval_minutes=settings.tracker_interval_minutes,
         tracked_hours=settings.tracker_hours,
-        videos=TrackedStore().active(),
+        total=len(videos),
+        videos=[item for item in videos if item.pinned or is_hot(item)] if hot_only else videos,
     )
 
 

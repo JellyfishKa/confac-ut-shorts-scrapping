@@ -31,7 +31,11 @@ class Settings(BaseSettings):
     tracker_hours: float = 48.0
 
     # The "Хайп" pick ignores videos below this many views as junk.
-    hype_min_views: int = 1_000
+    hype_min_views: int = 50_000
+    hype_max_age_hours: float = 48.0
+    hype_min_speed: float = 1_000.0
+    # A measured speed below this share of the lifetime average means the video has already peaked.
+    hype_min_growth_share: float = 0.3
     # Gemini model that judges whether a hype finalist is AI-generated.
     ai_check_model: str = "gemini-3.5-flash-lite"
 
@@ -39,7 +43,8 @@ class Settings(BaseSettings):
     discovery_enabled: bool = True
     discovery_interval_hours: float = 6.0
     discovery_queries_file: Path = Path("discovery_queries.txt")
-    discovery_platforms: str = "youtube,rutube"
+    discovery_platforms: str = "youtube"
+    discovery_min_views: int = 10_000
     discovery_max_age_hours: int = 72
     discovery_youtube_units_per_day: int = 6_000
     discovery_max_channels: int = 100

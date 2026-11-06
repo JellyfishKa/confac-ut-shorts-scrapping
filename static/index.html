@@ -44,7 +44,7 @@
     <div class="grid">
       <div class="field" style="grid-column:span 2"><label>Тема</label><input id="query" value="AI tools" placeholder="AI tools"/></div>
       <div class="field"><label>Макс. возраст, ч</label><input id="age" type="number" value="168"/></div>
-      <div class="field"><label>Мин. views</label><input id="views" type="number" min="0" value="0"/></div>
+      <div class="field"><label>Мин. views</label><input id="views" type="number" min="0" value="50000"/></div>
       <div class="field"><label>Мин. views/h</label><input id="vph" type="number" value="0"/></div>
       <div class="field"><label>Мин. like rate, %</label><input id="like" type="number" step="0.1" value="0"/></div>
       <div class="field"><label>Макс. длит., сек</label><input id="duration" type="number" value="180"/></div>
@@ -52,10 +52,8 @@
     </div>
     <div class="platforms" role="group" aria-label="Площадки для поиска">
       <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="youtube" checked/>YouTube Shorts</label>
-      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="vk"/>VK Клипы</label>
       <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="tiktok"/>TikTok</label>
       <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="instagram"/>Instagram Reels</label>
-      <label class="platform-choice"><input type="checkbox" name="searchPlatform" value="rutube"/>Rutube</label>
     </div>
     <div class="actions">
       <button onclick="searchVideos()">Найти по метаданным</button>
@@ -94,9 +92,6 @@
     <div class="field" style="max-width:260px"><label for="hypePlatform">Площадка</label>
       <select id="hypePlatform" onchange="showHype()">
         <option value="youtube" selected>YouTube Shorts</option>
-        <option value="">Все площадки</option>
-        <option value="rutube">Rutube</option>
-        <option value="vk">VK Клипы</option>
         <option value="tiktok">TikTok</option>
       </select>
     </div>
@@ -194,7 +189,7 @@ function apiError(detail){
 async function health(){
   try{const r=await fetch('/health');const d=await r.json();const el=$('apiBadge');
     if(d.growth_min_interval_minutes!=null){growthMinutes=d.growth_min_interval_minutes;document.querySelectorAll('.growthInterval').forEach(n=>n.textContent=growthMinutes)}
-    if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube подключён · Rutube без ключа'}else{el.querySelector('.dot').style.background='#fde68a';el.querySelector('span:last-child').textContent='Rutube без ключа · YouTube нужен ключ'}}
+    if(d.youtube_api_key_configured){el.querySelector('.dot').style.background='#86efac';el.querySelector('span:last-child').textContent='YouTube подключён'}else{el.querySelector('.dot').style.background='#fde68a';el.querySelector('span:last-child').textContent='YouTube: нужен ключ'}}
   catch(e){$('apiBadge').querySelector('span:last-child').textContent='Backend недоступен'}
 }
 async function searchVideos(){
@@ -370,7 +365,7 @@ function exportCSV(){
   saveBlob('video-candidates.csv',rows.join('\n'),'text/csv');
 }
 async function loadTracked(){
-  try{const r=await fetch('/api/tracked');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));renderTracked(d)}
+  try{const r=await fetch('/api/tracked?hot_only=true');const d=await r.json();if(!r.ok)throw new Error(apiError(d.detail));renderTracked(d)}
   catch(e){$('trackedStatus').className='small err';$('trackedStatus').textContent=e.message}
 }
 function sparkline(points){
@@ -386,7 +381,7 @@ function ago(iso){
 }
 function renderTracked(d){
   $('trackedStatus').className='small muted';
-  $('trackedStatus').textContent=`Ролики из поиска отслеживаются ${fixed(d.tracked_hours,0)} ч, закреплённые — без срока. Сервер перепроверяет их раз в ${fixed(d.interval_minutes,0)} мин, пока запущен.`;
+  $('trackedStatus').textContent=`Показано ${d.videos.length} из ${d.total}: недавние, популярные и ещё растущие. Ролики из поиска отслеживаются ${fixed(d.tracked_hours,0)} ч, закреплённые — без срока. Сервер перепроверяет их раз в ${fixed(d.interval_minutes,0)} мин, пока запущен.`;
   const body=$('tracked');
   if(!d.videos.length){body.innerHTML='<tr><td colspan="6" class="muted">Пока пусто: ролики появятся после поиска.</td></tr>';return}
   body.innerHTML='';

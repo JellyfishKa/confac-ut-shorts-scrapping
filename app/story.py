@@ -86,10 +86,12 @@ async def create_story(request: StoryRequest) -> StoryResponse:
         if not request.local_video_path:
             raise HTTPException(status_code=422, detail="Сначала скачайте MP4 через приложение, затем повторите анализ сюжета.")
         video_input = await asyncio.to_thread(_local_video_input, request.local_video_path, url)
-    try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            model = MODEL
-            for candidate in (MODEL, FALLBACK_MODEL):
+    response = None
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        model = MODEL
+        for candidate in (MODEL, FALLBACK_MODEL):
+            # A timeout or a dropped connection also moves on to the fallback model.
+            try:
                 response = await client.post(
                     GEMINI_URL,
                     headers={"x-goog-api-key": settings.gemini_api_key},
@@ -101,16 +103,19 @@ async def create_story(request: StoryRequest) -> StoryResponse:
                         ],
                     },
                 )
-                model = candidate
-                if response.status_code not in {502, 503, 504}:
-                    break
-            response.raise_for_status()
+            except httpx.RequestError:
+                continue
+            model = candidate
+            if response.status_code not in {502, 503, 504}:
+                break
+    if response is None:
+        raise HTTPException(status_code=502, detail="Не удалось связаться с Gemini. Попробуйте позже.")
+    try:
+        response.raise_for_status()
     except httpx.HTTPStatusError as exc:
         if "location is not supported" in exc.response.text:
             raise HTTPException(status_code=503, detail=GEO_BLOCKED) from exc
         raise _upstream_error(exc.response.status_code) from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail="Не удалось связаться с Gemini. Попробуйте позже.") from exc
 
     try:
         payload = response.json()

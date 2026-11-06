@@ -197,7 +197,7 @@ async def run_discovery(search: Search, now: datetime | None = None) -> Discover
             continue
         response = await search(SearchRequest(
             query=query, platforms=platforms, max_age_hours=settings.discovery_max_age_hours,
-            min_views=settings.hype_min_views, limit=SEARCH_LIMIT,
+            min_views=settings.discovery_min_views, limit=SEARCH_LIMIT,
         ))
         searched += 1
         candidates += response.returned
@@ -286,7 +286,7 @@ def _youtube_markers(queries: list[str], run_number: int) -> set[str]:
 def _filters() -> Filters:
     return Filters(
         max_age_hours=settings.discovery_max_age_hours,
-        min_views=settings.hype_min_views,
+        min_views=settings.discovery_min_views,
         min_views_per_hour=0,
         min_like_rate=0,
         max_duration_seconds=settings.default_max_duration_seconds,

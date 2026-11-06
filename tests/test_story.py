@@ -259,3 +259,25 @@ def test_social_story_requires_ffprobe(monkeypatch, tmp_path):
     })
     assert response.status_code == 503
     assert "ffprobe" in response.json()["detail"]
+
+
+def test_story_falls_back_when_the_main_model_times_out(monkeypatch):
+    monkeypatch.setattr(settings, "gemini_api_key", "test-secret")
+    models = []
+
+    def respond(request):
+        model = json.loads(request.content)["model"]
+        models.append(model)
+        if model == "gemini-3.8-flash":
+            raise httpx.ReadTimeout("no answer", request=request)
+        return httpx.Response(200, json={"steps": [
+            {"type": "model_output", "content": [{"type": "text", "text": "Сюжет."}]}
+        ]})
+
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(respond)
+    monkeypatch.setattr("app.story.httpx.AsyncClient", lambda *a, **kw: original_client(*a, transport=transport, **kw))
+    response = TestClient(app).post("/api/story", json={"url": "https://youtu.be/abc123"})
+    assert response.status_code == 200
+    assert response.json()["model"] == "gemini-3.5-flash-lite"
+    assert models == ["gemini-3.8-flash", "gemini-3.5-flash-lite"]

@@ -134,3 +134,29 @@ def test_hype_api_filters_by_platform():
     assert client.get("/api/hype", params={"platform": "youtube"}).json()["considered"] == 1
     assert client.get("/api/hype", params={"platform": "rutube"}).json()["considered"] == 0
     assert client.get("/api/hype", params={"platform": "myspace"}).status_code == 422
+
+
+def test_strict_filter_keeps_only_recent_popular_and_still_rising(monkeypatch):
+    monkeypatch.setattr(settings, "hype_min_views", 50_000)
+    monkeypatch.setattr(settings, "hype_max_age_hours", 48)
+    monkeypatch.setattr(settings, "hype_min_speed", 1_000)
+    monkeypatch.setattr(settings, "hype_min_growth_share", 0.3)
+    videos = [
+        tracked("rising", speed=5_000, growth=4_000),
+        tracked("unmeasured", speed=5_000),
+        tracked("few-views", speed=5_000, views=49_999),
+        tracked("old", speed=5_000, age=49),
+        tracked("slow", speed=500),
+        tracked("peaked", speed=5_000, growth=1_400),
+    ]
+    assert {pick.video.video_id for pick in pick_hype(videos, limit=10).picks} == {"rising", "unmeasured"}
+
+
+def test_tracked_list_can_show_only_hot_videos(monkeypatch):
+    monkeypatch.setattr(settings, "hype_min_views", 1000)
+    now = datetime.now(timezone.utc)
+    TrackedStore().track([tracked("hot", speed=500).video, tracked("cold", speed=1, views=10).video], now=now)
+    client = TestClient(app)
+    data = client.get("/api/tracked", params={"hot_only": True}).json()
+    assert data["total"] == 2 and [item["video"]["video_id"] for item in data["videos"]] == ["hot"]
+    assert len(client.get("/api/tracked").json()["videos"]) == 2
